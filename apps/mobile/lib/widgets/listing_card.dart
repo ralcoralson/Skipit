@@ -1,29 +1,62 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../core/network/api_client.dart';
 import '../core/theme/app_colors.dart';
 import '../models/listing_model.dart';
 
-class MobileListingCard extends StatelessWidget {
+class MobileListingCard extends StatefulWidget {
   final ListingModel listing;
   final VoidCallback? onWishlistTap;
+  final VoidCallback? onTap;
 
   const MobileListingCard({
     super.key,
     required this.listing,
     this.onWishlistTap,
+    this.onTap,
   });
 
   @override
+  State<MobileListingCard> createState() => _MobileListingCardState();
+}
+
+class _MobileListingCardState extends State<MobileListingCard> {
+  late bool _isWishlisted;
+
+  @override
+  void initState() {
+    super.initState();
+    _isWishlisted = widget.listing.isWishlisted;
+  }
+
+  Future<void> _toggleWishlist() async {
+    setState(() => _isWishlisted = !_isWishlisted);
+    try {
+      if (_isWishlisted) {
+        await apiClient.dio.post('/wishlist/${widget.listing.id}');
+      } else {
+        await apiClient.dio.delete('/wishlist/${widget.listing.id}');
+      }
+      widget.onWishlistTap?.call();
+    } catch (_) {
+      // Rollback on failure
+      setState(() => _isWishlisted = !_isWishlisted);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final listing = widget.listing;
     final primaryImg = listing.images.isNotEmpty
         ? listing.images.first
         : 'https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=600&q=80';
 
     return GestureDetector(
-      onTap: () {
-        context.push('/listing/${listing.id}', extra: listing);
-      },
+      onTap: widget.onTap ??
+          () {
+            context.push('/listing/${listing.id}', extra: listing);
+          },
       child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
         child: BackdropFilter(
@@ -124,6 +157,28 @@ class MobileListingCard extends StatelessWidget {
                             fontSize: 9,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 0.4,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Heart Bookmark Button
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: GestureDetector(
+                        onTap: _toggleWishlist,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xCC060B18),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0x3538BDF8)),
+                          ),
+                          child: Icon(
+                            _isWishlisted ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                            color: _isWishlisted ? Colors.redAccent : Colors.white,
+                            size: 16,
                           ),
                         ),
                       ),
@@ -254,3 +309,5 @@ class MobileListingCard extends StatelessWidget {
     );
   }
 }
+
+typedef ListingCard = MobileListingCard;

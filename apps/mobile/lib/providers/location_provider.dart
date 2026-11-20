@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/config/app_config.dart';
 
 class LocationState {
   final String selectedCity;
@@ -70,7 +71,7 @@ class LocationNotifier extends StateNotifier<LocationState> {
         receiveTimeout: const Duration(seconds: 4),
       ));
 
-      final res = await dio.get('http://ip-api.com/json');
+      final res = await dio.get('${AppConfig.apiBaseUrl}/geo/ip');
       if (res.statusCode == 200 && res.data != null) {
         final city = res.data['city']?.toString() ?? '';
         final region = res.data['regionName']?.toString() ?? '';

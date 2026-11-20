@@ -49,7 +49,6 @@ class HomeScreen extends ConsumerWidget {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
             child: Container(
-              color: const Color(0xB3060B18), // Cosmic space glass
               padding: EdgeInsets.only(
                 top: MediaQuery.of(context).padding.top + 6,
                 bottom: 10,
@@ -57,6 +56,7 @@ class HomeScreen extends ConsumerWidget {
                 right: 16,
               ),
               decoration: const BoxDecoration(
+                color: Color(0xB3060B18), // Cosmic space glass
                 border: Border(
                   bottom: BorderSide(
                     color: Color(0x2B38BDF8),

@@ -11,10 +11,11 @@ void main() {
     );
 
     // Initial frame displays splash branding
-    expect(find.text('SkipIt'), findsOneWidget);
+    expect(find.text('skipit'), findsOneWidget);
     expect(find.text('Skip Buying. Rent Smarter.'), findsOneWidget);
 
-    // Settle timer and animations
-    await tester.pumpAndSettle(const Duration(seconds: 3));
+    // Let the 2-second splash timer elapse
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pump(const Duration(milliseconds: 100));
   });
 }

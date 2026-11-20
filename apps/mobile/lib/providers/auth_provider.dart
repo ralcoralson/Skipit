@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/network/api_client.dart';
+import '../core/network/fcm_service.dart';
 import '../models/user_model.dart';
 
 class AuthState {
@@ -58,6 +59,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
             state = state.copyWith(user: refreshed);
           }
         }).catchError((_) {});
+
+        // Ensure FCM token is registered
+        FcmService.registerDeviceToken();
       } else {
         state = AuthState(isLoading: false);
       }
@@ -66,20 +70,11 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  Future<bool> signInWithGoogle({
-    required String email,
-    String? fullName,
-    String? avatarUrl,
-    String? credential,
-    String? idToken,
-  }) async {
+  Future<bool> signInWithGoogleToken(String idToken) async {
     try {
       state = state.copyWith(isLoading: true, error: null);
       final res = await apiClient.dio.post('/auth/google', data: {
-        'email': email,
-        'full_name': fullName,
-        'avatar_url': avatarUrl,
-        'credential': credential,
+        'credential': idToken,
         'id_token': idToken,
       });
 
@@ -91,6 +86,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await prefs.setString('skipit_user', jsonEncode(user.toJson()));
 
       state = AuthState(token: token, user: user, isLoading: false);
+      FcmService.registerDeviceToken();
       return true;
     } on DioException catch (e) {
       String errorMsg = 'Google Sign-In failed';
@@ -99,10 +95,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       } else if (e.message != null && e.message!.isNotEmpty) {
         errorMsg = e.message!;
       }
-      state = state.copyWith(
-        isLoading: false,
-        error: errorMsg,
-      );
+      state = state.copyWith(isLoading: false, error: errorMsg);
       return false;
     }
   }
@@ -124,6 +117,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await prefs.setString('skipit_user', jsonEncode(user.toJson()));
 
       state = AuthState(token: token, user: user, isLoading: false);
+      FcmService.registerDeviceToken();
       return true;
     } on DioException catch (e) {
       String errorMsg = 'Registration failed';
@@ -132,10 +126,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       } else if (e.message != null && e.message!.isNotEmpty) {
         errorMsg = e.message!;
       }
-      state = state.copyWith(
-        isLoading: false,
-        error: errorMsg,
-      );
+      state = state.copyWith(isLoading: false, error: errorMsg);
       return false;
     }
   }
@@ -169,6 +160,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await prefs.setString('skipit_user', jsonEncode(user.toJson()));
 
       state = AuthState(token: token, user: user, isLoading: false);
+      FcmService.registerDeviceToken();
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isLoading: false, error: e.response?.data['error'] ?? 'Invalid OTP code');
@@ -192,6 +184,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await prefs.setString('skipit_user', jsonEncode(user.toJson()));
 
       state = AuthState(token: token, user: user, isLoading: false);
+      FcmService.registerDeviceToken();
       return true;
     } on DioException catch (e) {
       state = state.copyWith(isLoading: false, error: e.response?.data['error'] ?? 'Login failed');
@@ -199,7 +192,45 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  Future<bool> updateProfile({String? fullName, String? bio, String? location, String? avatarUrl}) async {
+    try {
+      state = state.copyWith(isLoading: true, error: null);
+      final body = <String, dynamic>{};
+      if (fullName != null) body['full_name'] = fullName;
+      if (bio != null) body['bio'] = bio;
+      if (location != null) body['location'] = location;
+      if (avatarUrl != null) body['avatar_url'] = avatarUrl;
+
+      final res = await apiClient.dio.patch('/auth/profile', data: body);
+      if (res.data['user'] != null) {
+        final updated = UserModel.fromJson(res.data['user']);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('skipit_user', jsonEncode(updated.toJson()));
+        state = state.copyWith(user: updated, isLoading: false);
+        return true;
+      }
+      state = state.copyWith(isLoading: false);
+      return true;
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: 'Failed to update profile');
+      return false;
+    }
+  }
+
+  Future<bool> deleteAccount() async {
+    try {
+      state = state.copyWith(isLoading: true, error: null);
+      await apiClient.dio.delete('/auth/account');
+      await logout();
+      return true;
+    } catch (e) {
+      state = state.copyWith(isLoading: false, error: 'Failed to delete account');
+      return false;
+    }
+  }
+
   Future<void> logout() async {
+    await FcmService.unregisterDeviceToken();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('skipit_token');
     await prefs.remove('skipit_user');

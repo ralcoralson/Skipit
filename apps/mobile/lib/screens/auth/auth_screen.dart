@@ -1,7 +1,7 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../../core/theme/app_colors.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/ambient_background.dart';
@@ -30,273 +30,57 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
     super.dispose();
   }
 
-  void _triggerGoogleAuth({required String email, String? name}) async {
-    final success = await ref.read(authProvider.notifier).signInWithGoogle(
-          email: email,
-          fullName: name,
-          avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=${Uri.encodeComponent(name ?? email)}',
+  Future<void> _handleGoogleSignIn() async {
+    try {
+      final googleSignIn = GoogleSignIn(scopes: ['email', 'profile']);
+      final account = await googleSignIn.signIn();
+      if (account == null) return; // User cancelled
+
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              backgroundColor: Color(0xFF7F1D1D),
+              content: Text('Could not obtain Google ID token', style: TextStyle(color: Colors.white)),
+            ),
+          );
+        }
+        return;
+      }
+
+      final success = await ref.read(authProvider.notifier).signInWithGoogleToken(idToken);
+      if (success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF0F2454),
+            content: Text(
+              'Welcome, ${account.displayName ?? account.email.split('@').first}! Signed in with Google.',
+              style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold),
+            ),
+          ),
         );
-
-    if (success && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFF0F2454),
-          content: Text(
-            'Welcome, ${name ?? email.split('@').first}! Signed in with Google.',
-            style: const TextStyle(color: AppColors.accent, fontWeight: FontWeight.bold),
+        context.pop();
+      } else if (mounted) {
+        final error = ref.read(authProvider).error ?? 'Google Sign-In failed';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF7F1D1D),
+            content: Text(error, style: const TextStyle(color: Colors.white)),
           ),
-        ),
-      );
-      context.pop();
-    } else if (mounted) {
-      final error = ref.read(authProvider).error ?? 'Google Sign-In failed';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: const Color(0xFF7F1D1D),
-          content: Text(error, style: const TextStyle(color: Colors.white)),
-        ),
-      );
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF7F1D1D),
+            content: Text('Google Sign-In Error: $e', style: const TextStyle(color: Colors.white)),
+          ),
+        );
+      }
     }
-  }
-
-  void _showGoogleAccountPicker() {
-    final customEmailCtrl = TextEditingController();
-    final customNameCtrl = TextEditingController();
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (ctx) => BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          padding: EdgeInsets.only(
-            left: 20,
-            right: 20,
-            top: 24,
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-          ),
-          decoration: const BoxDecoration(
-            color: Color(0xFA0A1128),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-            border: Border(
-              top: BorderSide(color: Color(0x4D38BDF8), width: 1.2),
-            ),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 44,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.textMuted.withOpacity(0.4),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'G',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF4285F4),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text(
-                        'Sign in with Google',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      Text(
-                        'Choose an account to continue to SkipIt',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-
-              // Account 1: Mridul Sharma (Quick 1-Tap)
-              _buildGoogleAccountTile(
-                name: 'Mridul Sharma',
-                email: 'mridulsharma726@gmail.com',
-                initial: 'M',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _triggerGoogleAuth(
-                    email: 'mridulsharma726@gmail.com',
-                    name: 'Mridul Sharma',
-                  );
-                },
-              ),
-              const SizedBox(height: 10),
-
-              // Account 2: SkipIt Tester
-              _buildGoogleAccountTile(
-                name: 'SkipIt Beta Tester',
-                email: 'skipit.tester@gmail.com',
-                initial: 'S',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _triggerGoogleAuth(
-                    email: 'skipit.tester@gmail.com',
-                    name: 'SkipIt Beta Tester',
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-
-              const Divider(color: Color(0x2538BDF8)),
-              const SizedBox(height: 10),
-
-              // Custom Google Email Input Option
-              const Text(
-                'Or use another Google email:',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.accent),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: customEmailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'yourname@gmail.com',
-                  prefixIcon: const Icon(Icons.alternate_email_rounded, size: 18, color: AppColors.accent),
-                  filled: true,
-                  fillColor: const Color(0x331E293B),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: customNameCtrl,
-                style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
-                decoration: InputDecoration(
-                  hintText: 'Full Name (optional)',
-                  prefixIcon: const Icon(Icons.badge_rounded, size: 18, color: AppColors.accent),
-                  filled: true,
-                  fillColor: const Color(0x331E293B),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                ),
-              ),
-              const SizedBox(height: 14),
-
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton(
-                  onPressed: () {
-                    final email = customEmailCtrl.text.trim();
-                    final name = customNameCtrl.text.trim();
-                    if (email.isEmpty || !email.contains('@')) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Please enter a valid Google email address')),
-                      );
-                      return;
-                    }
-                    Navigator.pop(ctx);
-                    _triggerGoogleAuth(
-                      email: email,
-                      name: name.isNotEmpty ? name : null,
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2563EB),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: const Text(
-                    'Continue with this Email',
-                    style: TextStyle(fontWeight: FontWeight.w800, color: Colors.white),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGoogleAccountTile({
-    required String name,
-    required String email,
-    required String initial,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0x381E3A8A),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0x3538BDF8), width: 1),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: const Color(0xFF2563EB),
-              child: Text(
-                initial,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  Text(
-                    email,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.accent),
-          ],
-        ),
-      ),
-    );
   }
 
   void _handleEmailSubmit() async {
@@ -412,7 +196,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
 
                     // 1. Prominent Google Sign-In Button (Cosmic Glass)
                     GestureDetector(
-                      onTap: authState.isLoading ? null : _showGoogleAccountPicker,
+                      onTap: authState.isLoading ? null : _handleGoogleSignIn,
                       child: Container(
                         width: double.infinity,
                         height: 52,

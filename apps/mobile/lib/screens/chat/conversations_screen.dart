@@ -37,7 +37,6 @@ class _ConversationsScreenState extends ConsumerState<ConversationsScreen> {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
-              color: const Color(0xB3060B18),
               padding: EdgeInsets.only(
                 top: MediaQuery.of(context).padding.top + 6,
                 bottom: 8,
@@ -45,6 +44,7 @@ class _ConversationsScreenState extends ConsumerState<ConversationsScreen> {
                 right: 16,
               ),
               decoration: const BoxDecoration(
+                color: Color(0xB3060B18),
                 border: Border(bottom: BorderSide(color: Color(0x2B38BDF8), width: 1)),
               ),
               child: Row(

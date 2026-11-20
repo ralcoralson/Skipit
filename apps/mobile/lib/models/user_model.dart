@@ -14,6 +14,8 @@ class UserModel {
   final int totalRentals;
   final int totalListings;
 
+  String? get phoneNumber => phone;
+
   UserModel({
     required this.id,
     required this.fullName,

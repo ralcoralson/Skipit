@@ -6,6 +6,8 @@ class ListingModel {
   final String title;
   final String description;
   final double pricePerDay;
+  final double? pricePerWeek;
+  final double? pricePerMonth;
   final double depositAmount;
   final String category;
   final String condition;
@@ -25,6 +27,8 @@ class ListingModel {
     required this.title,
     required this.description,
     required this.pricePerDay,
+    this.pricePerWeek,
+    this.pricePerMonth,
     this.depositAmount = 0.0,
     required this.category,
     this.condition = 'good',
@@ -58,6 +62,8 @@ class ListingModel {
       title: json['title'] ?? '',
       description: json['description'] ?? '',
       pricePerDay: (json['price_per_day'] != null) ? double.parse(json['price_per_day'].toString()) : 0.0,
+      pricePerWeek: (json['price_per_week'] != null) ? double.parse(json['price_per_week'].toString()) : null,
+      pricePerMonth: (json['price_per_month'] != null) ? double.parse(json['price_per_month'].toString()) : null,
       depositAmount: (json['deposit_amount'] != null) ? double.parse(json['deposit_amount'].toString()) : 0.0,
       category: json['category'] ?? 'Other',
       condition: json['condition'] ?? 'good',

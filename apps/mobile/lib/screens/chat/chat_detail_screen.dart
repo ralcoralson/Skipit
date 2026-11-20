@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/network/api_client.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/conversation_model.dart';
 import '../../providers/auth_provider.dart';
@@ -88,7 +89,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded, color: AppColors.textPrimary),
+                    icon: const Icon(Icons.arrow_back_rounded,
+                        color: AppColors.textPrimary),
                     onPressed: () => context.pop(),
                   ),
                   Stack(
@@ -104,7 +106,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                         ),
                         alignment: Alignment.center,
                         child: Text(
-                          widget.conversation?.peer.fullName.characters.first ?? 'U',
+                          widget.conversation?.peer.fullName.characters.first ??
+                              'U',
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w900,
@@ -152,6 +155,92 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                       ],
                     ),
                   ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert_rounded, color: AppColors.textPrimary),
+                    onSelected: (val) async {
+                      if (val == 'block') {
+                        try {
+                          await apiClient.dio.post('/users/${widget.peerId}/block', data: {
+                            'reason': 'Blocked by user from chat',
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              backgroundColor: Color(0xFF0F2454),
+                              content: Text('User blocked. Messaging is now restricted.', style: TextStyle(color: AppColors.accent)),
+                            ),
+                          );
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(backgroundColor: Colors.redAccent, content: Text('Failed to block: $e')),
+                          );
+                        }
+                      } else if (val == 'unblock') {
+                        try {
+                          await apiClient.dio.delete('/users/${widget.peerId}/block');
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              backgroundColor: Color(0xFF0F2454),
+                              content: Text('User unblocked successfully.', style: TextStyle(color: AppColors.accent)),
+                            ),
+                          );
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(backgroundColor: Colors.redAccent, content: Text('Failed to unblock: $e')),
+                          );
+                        }
+                      } else if (val == 'report') {
+                        try {
+                          await apiClient.dio.post('/reports', data: {
+                            'reported_id': widget.peerId,
+                            'report_type': 'user',
+                            'reason': 'Chat misconduct or harassment',
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              backgroundColor: Color(0xFF0F2454),
+                              content: Text('Report submitted to moderation.', style: TextStyle(color: AppColors.accent)),
+                            ),
+                          );
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(backgroundColor: Colors.redAccent, content: Text('Report failed: $e')),
+                          );
+                        }
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      const PopupMenuItem(
+                        value: 'block',
+                        child: Row(
+                          children: [
+                            Icon(Icons.block_rounded, color: Colors.redAccent, size: 18),
+                            SizedBox(width: 8),
+                            Text('Block User', style: TextStyle(color: Colors.redAccent, fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'unblock',
+                        child: Row(
+                          children: [
+                            Icon(Icons.lock_open_rounded, color: AppColors.textPrimary, size: 18),
+                            SizedBox(width: 8),
+                            Text('Unblock User', style: TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'report',
+                        child: Row(
+                          children: [
+                            Icon(Icons.flag_outlined, color: Colors.amber, size: 18),
+                            SizedBox(width: 8),
+                            Text('Report User', style: TextStyle(color: AppColors.textPrimary, fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -166,7 +255,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
             // Product Listing Context Preview (Glass Card)
             if (listing != null)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: GlassContainer(
                   level: GlassLevel.standard,
                   padding: const EdgeInsets.all(10),
@@ -219,7 +309,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
             Expanded(
               child: ListView.builder(
                 controller: _scrollController,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 itemCount: chatState.activeMessages.length,
                 itemBuilder: (context, index) {
                   final msg = chatState.activeMessages[index];
@@ -227,25 +318,35 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                   final isInquiry = msg.content.startsWith('[RENTAL INQUIRY');
 
                   return Align(
-                    alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    alignment:
+                        isMe ? Alignment.centerRight : Alignment.centerLeft,
                     child: Container(
                       margin: const EdgeInsets.only(bottom: 12),
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
+                      constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.78),
                       child: ClipRRect(
                         borderRadius: BorderRadius.only(
                           topLeft: const Radius.circular(18),
                           topRight: const Radius.circular(18),
-                          bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
-                          bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
+                          bottomLeft: isMe
+                              ? const Radius.circular(18)
+                              : const Radius.circular(4),
+                          bottomRight: isMe
+                              ? const Radius.circular(4)
+                              : const Radius.circular(18),
                         ),
                         child: BackdropFilter(
                           filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 11),
                             decoration: BoxDecoration(
                               gradient: isMe
                                   ? const LinearGradient(
-                                      colors: [AppColors.primary, Color(0xFF3B82F6)],
+                                      colors: [
+                                        AppColors.primary,
+                                        Color(0xFF3B82F6)
+                                      ],
                                       begin: Alignment.topLeft,
                                       end: Alignment.bottomRight,
                                     )
@@ -253,13 +354,18 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                               color: isMe
                                   ? null
                                   : isInquiry
-                                      ? const Color(0xFFEFF6FF).withOpacity(0.92)
+                                      ? const Color(0xFFEFF6FF)
+                                          .withOpacity(0.92)
                                       : Colors.white.withOpacity(0.85),
                               borderRadius: BorderRadius.only(
                                 topLeft: const Radius.circular(18),
                                 topRight: const Radius.circular(18),
-                                bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
-                                bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
+                                bottomLeft: isMe
+                                    ? const Radius.circular(18)
+                                    : const Radius.circular(4),
+                                bottomRight: isMe
+                                    ? const Radius.circular(4)
+                                    : const Radius.circular(18),
                               ),
                               border: Border.all(
                                 color: isMe
@@ -269,7 +375,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF172554).withOpacity(0.06),
+                                  color:
+                                      const Color(0xFF172554).withOpacity(0.06),
                                   blurRadius: 10,
                                   offset: const Offset(0, 3),
                                 ),
@@ -279,7 +386,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                               msg.content,
                               style: TextStyle(
                                 fontSize: 13,
-                                color: isMe ? Colors.white : AppColors.textPrimary,
+                                color:
+                                    isMe ? Colors.white : AppColors.textPrimary,
                                 height: 1.35,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -309,7 +417,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.82),
                     border: Border(
-                      top: BorderSide(color: Colors.white.withOpacity(0.7), width: 1),
+                      top: BorderSide(
+                          color: Colors.white.withOpacity(0.7), width: 1),
                     ),
                   ),
                   child: Row(
@@ -334,13 +443,16 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                       Expanded(
                         child: TextField(
                           controller: _messageController,
-                          style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textPrimary),
                           decoration: InputDecoration(
                             hintText: 'Type a message to agree terms...',
-                            hintStyle: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                            hintStyle: const TextStyle(
+                                color: AppColors.textMuted, fontSize: 13),
                             fillColor: Colors.white.withOpacity(0.9),
                             filled: true,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 10),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(22),
                               borderSide: BorderSide(color: AppColors.border),
@@ -351,7 +463,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(22),
-                              borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+                              borderSide: const BorderSide(
+                                  color: AppColors.primary, width: 1.5),
                             ),
                           ),
                         ),
@@ -379,7 +492,8 @@ class _ChatDetailScreenState extends ConsumerState<ChatDetailScreen> {
                               ),
                             ],
                           ),
-                          child: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
+                          child: const Icon(Icons.send_rounded,
+                              color: Colors.white, size: 18),
                         ),
                       ),
                     ],

@@ -37,7 +37,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
             child: Container(
-              color: const Color(0xB3060B18),
               padding: EdgeInsets.only(
                 top: MediaQuery.of(context).padding.top + 6,
                 bottom: 8,
@@ -45,6 +44,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 right: 16,
               ),
               decoration: const BoxDecoration(
+                color: Color(0xB3060B18),
                 border: Border(
                     bottom: BorderSide(color: Color(0x2B38BDF8), width: 1)),
               ),
@@ -236,59 +236,112 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     const SizedBox(height: 16),
 
                     // KYC Identity Status Panel
-                    GlassContainer(
-                      level: GlassLevel.standard,
-                      padding: const EdgeInsets.all(16),
+                    InkWell(
+                      onTap: () => context.push('/kyc'),
                       borderRadius: BorderRadius.circular(20),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            decoration: BoxDecoration(
-                              color: authState.user!.isVerified
-                                  ? AppColors.success.withOpacity(0.15)
-                                  : AppColors.warning.withOpacity(0.15),
-                              shape: BoxShape.circle,
+                      child: GlassContainer(
+                        level: GlassLevel.standard,
+                        padding: const EdgeInsets.all(16),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: authState.user!.isVerified
+                                    ? AppColors.success.withOpacity(0.15)
+                                    : AppColors.warning.withOpacity(0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                authState.user!.isVerified
+                                    ? Icons.verified_user_rounded
+                                    : Icons.gpp_maybe_rounded,
+                                color: authState.user!.isVerified
+                                    ? AppColors.success
+                                    : AppColors.warning,
+                                size: 22,
+                              ),
                             ),
-                            child: Icon(
-                              authState.user!.isVerified
-                                  ? Icons.verified_user_rounded
-                                  : Icons.gpp_maybe_rounded,
-                              color: authState.user!.isVerified
-                                  ? AppColors.success
-                                  : AppColors.warning,
-                              size: 22,
-                            ),
-                          ),
-                          const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  authState.user!.isVerified
-                                      ? 'Identity Verified'
-                                      : 'KYC Verification Pending',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w800,
-                                    color: authState.user!.isVerified
-                                        ? AppColors.success
-                                        : AppColors.textPrimary,
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    authState.user!.isVerified
+                                        ? 'Identity Verified'
+                                        : 'KYC Verification Pending',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: authState.user!.isVerified
+                                          ? AppColors.success
+                                          : AppColors.textPrimary,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  authState.user!.isVerified
-                                      ? 'Your verified host badge is live to all renters.'
-                                      : 'Upload Gov ID to boost trust score and unlock badges.',
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: AppColors.textSecondary),
-                                ),
-                              ],
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    authState.user!.isVerified
+                                        ? 'Your verified host badge is live to all renters.'
+                                        : 'Upload Gov ID to boost trust score and unlock badges.',
+                                    style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.textSecondary),
+                                  ),
+                                ],
+                              ),
                             ),
+                            const Icon(Icons.arrow_forward_ios_rounded,
+                                size: 14, color: AppColors.accent),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // Quick Actions Hub
+                    GlassContainer(
+                      level: GlassLevel.subtle,
+                      padding: const EdgeInsets.all(14),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Column(
+                        children: [
+                          _buildMenuTile(
+                            icon: Icons.calendar_month_rounded,
+                            title: 'My Rentals Hub',
+                            subtitle: 'View incoming and sent rental requests',
+                            onTap: () => context.push('/rentals'),
+                          ),
+                          const Divider(color: Color(0x2038BDF8), height: 16),
+                          _buildMenuTile(
+                            icon: Icons.favorite_rounded,
+                            title: 'Saved Wishlist',
+                            subtitle: 'Items you bookmarked for later',
+                            onTap: () => context.push('/wishlist'),
+                          ),
+                          const Divider(color: Color(0x2038BDF8), height: 16),
+                          _buildMenuTile(
+                            icon: Icons.notifications_rounded,
+                            title: 'Notifications',
+                            subtitle: 'Rental alerts and inquiry updates',
+                            onTap: () => context.push('/notifications'),
+                          ),
+                          const Divider(color: Color(0x2038BDF8), height: 16),
+                          _buildMenuTile(
+                            icon: Icons.headset_mic_rounded,
+                            title: 'Support Tickets',
+                            subtitle: 'Get help or report a dispute',
+                            onTap: () => context.push('/support'),
+                          ),
+                          const Divider(color: Color(0x2038BDF8), height: 16),
+                          _buildMenuTile(
+                            icon: Icons.edit_note_rounded,
+                            title: 'Edit Profile & Avatar',
+                            subtitle: 'Update your display name and photo',
+                            onTap: () => context.push('/edit-profile'),
                           ),
                         ],
                       ),
@@ -459,9 +512,112 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           );
                         },
                       ),
+
+                    const SizedBox(height: 32),
+
+                    // Danger Zone: Delete Account
+                    Center(
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent, size: 18),
+                        label: const Text(
+                          'Delete SkipIt Account & Data',
+                          style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.w700),
+                        ),
+                        onPressed: () => _showDeleteAccountDialog(context),
+                      ),
+                    ),
+                    const SizedBox(height: 40),
                   ],
                 ),
               ),
+      ),
+    );
+  }
+
+  Widget _buildMenuTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.18),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: AppColors.accent, size: 18),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteAccountDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFA0A1128),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Colors.redAccent),
+        ),
+        title: const Text('Delete Account?',
+            style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'This action is irreversible. Your profile, listings, and stored identity verification documents will be permanently removed.',
+          style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await ref.read(authProvider.notifier).deleteAccount();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Account deleted successfully')),
+                );
+              }
+            },
+            child: const Text('Delete Permanently',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
       ),
     );
   }

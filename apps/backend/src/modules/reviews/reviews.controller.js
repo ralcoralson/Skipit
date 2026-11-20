@@ -2,7 +2,7 @@ const { supabaseAdmin } = require('../../config/supabase');
 
 const createReview = async (req, res, next) => {
   try {
-    const { reviewee_id, listing_id, rating, comment } = req.body;
+    const { reviewee_id, rental_request_id, listing_id, rating, comment } = req.body;
 
     if (!reviewee_id || !rating || !comment) {
       return res.status(400).json({
@@ -18,17 +18,72 @@ const createReview = async (req, res, next) => {
       });
     }
 
-    const numRating = parseInt(rating);
-    if (numRating < 1 || numRating > 5) {
+    const numRating = parseInt(rating, 10);
+    if (isNaN(numRating) || numRating < 1 || numRating > 5) {
       return res.status(400).json({ success: false, error: 'Rating must be between 1 and 5' });
+    }
+
+    // Phase 1.9: Review gating - Require a completed rental_requests row
+    if (!rental_request_id) {
+      return res.status(403).json({
+        success: false,
+        error: 'A completed rental_request_id is required to submit a verified review',
+      });
+    }
+
+    const { data: rental, error: rentalErr } = await supabaseAdmin
+      .from('rental_requests')
+      .select('id, owner_id, renter_id, listing_id, request_status')
+      .eq('id', rental_request_id)
+      .maybeSingle();
+
+    if (rentalErr || !rental) {
+      return res.status(403).json({
+        success: false,
+        error: 'Associated rental request was not found',
+      });
+    }
+
+    if (rental.request_status !== 'completed') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only completed rentals can be reviewed. Current status: ' + rental.request_status,
+      });
+    }
+
+    // Validate that reviewer and reviewee are counterpart parties of this rental
+    const isRenterReviewingOwner = rental.renter_id === req.user.id && rental.owner_id === reviewee_id;
+    const isOwnerReviewingRenter = rental.owner_id === req.user.id && rental.renter_id === reviewee_id;
+
+    if (!isRenterReviewingOwner && !isOwnerReviewingRenter) {
+      return res.status(403).json({
+        success: false,
+        error: 'You may only review the peer counter-party of your completed rental agreement',
+      });
+    }
+
+    // Allow exactly one review per rental per reviewer
+    const { data: existingReview } = await supabaseAdmin
+      .from('reviews')
+      .select('id')
+      .eq('rental_request_id', rental_request_id)
+      .eq('reviewer_id', req.user.id)
+      .maybeSingle();
+
+    if (existingReview) {
+      return res.status(400).json({
+        success: false,
+        error: 'You have already submitted a review for this completed rental',
+      });
     }
 
     const reviewPayload = {
       reviewer_id: req.user.id,
       reviewee_id,
-      listing_id: listing_id || null,
+      rental_request_id: rental.id,
+      listing_id: rental.listing_id || listing_id || null,
       rating: numRating,
-      comment,
+      comment: comment.trim(),
       is_verified_rental: true,
       created_at: new Date().toISOString(),
     };
@@ -43,7 +98,7 @@ const createReview = async (req, res, next) => {
       return res.status(400).json({ success: false, error: error.message });
     }
 
-    // Recalculate target user's average rating and total reviews
+    // Recalculate target user's average rating, review count, and weighted trust score
     const { data: allReviews } = await supabaseAdmin
       .from('reviews')
       .select('rating')
@@ -51,12 +106,17 @@ const createReview = async (req, res, next) => {
 
     if (allReviews && allReviews.length > 0) {
       const avg = allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length;
+      // Controlled trust score: Base 50 + rating quality (up to 25) + verified volume (up to 25)
+      const ratingBonus = (avg / 5) * 25;
+      const volumeBonus = Math.min(25, allReviews.length * 2.5);
+      const calculatedTrustScore = Math.min(100, Math.round(50 + ratingBonus + volumeBonus));
+
       await supabaseAdmin
         .from('profiles')
         .update({
           rating: parseFloat(avg.toFixed(1)),
           total_reviews: allReviews.length,
-          trust_score: Math.min(100, 50 + (allReviews.length * 5)),
+          trust_score: calculatedTrustScore,
         })
         .eq('id', reviewee_id);
     }

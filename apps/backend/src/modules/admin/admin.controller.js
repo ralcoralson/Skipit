@@ -1,4 +1,5 @@
 const { supabaseAdmin } = require('../../config/supabase');
+const { sanitizeSearchText } = require('../../utils/filterSanitizer');
 
 // 1. Dashboard Metrics
 const getDashboardMetrics = async (req, res, next) => {
@@ -47,7 +48,10 @@ const listUsers = async (req, res, next) => {
       .select('*', { count: 'exact' });
 
     if (q) {
-      query = query.or(`full_name.ilike.%${q}%,phone.ilike.%${q}%,location.ilike.%${q}%`);
+      const cleanQ = sanitizeSearchText(q);
+      if (cleanQ) {
+        query = query.or(`full_name.ilike.%${cleanQ}%,phone.ilike.%${cleanQ}%,location.ilike.%${cleanQ}%`);
+      }
     }
 
     if (role) {
@@ -78,11 +82,29 @@ const listUsers = async (req, res, next) => {
   }
 };
 
-// 3. Suspend / Reactivate User
+// 3. Suspend / Reactivate User (Safeguards from Phase 1.11: No self-ban or admin-ban)
 const toggleUserBan = async (req, res, next) => {
   try {
     const { userId } = req.params;
     const { is_banned, reason } = req.body;
+
+    if (userId === req.user.id) {
+      return res.status(400).json({ success: false, error: 'Administrators cannot suspend their own account' });
+    }
+
+    const { data: targetUser } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    if (targetUser.role === 'admin') {
+      return res.status(403).json({ success: false, error: 'Cannot suspend another administrator account' });
+    }
 
     const { data: user, error } = await supabaseAdmin
       .from('profiles')
@@ -125,7 +147,82 @@ const toggleUserBan = async (req, res, next) => {
   }
 };
 
-// 4. List KYC Verification Queue
+// 3.1 Change User Role with Audit Log
+const updateUserRole = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { role } = req.body;
+
+    if (!['user', 'moderator', 'admin'].includes(role)) {
+      return res.status(400).json({ success: false, error: 'Role must be user, moderator, or admin' });
+    }
+
+    if (userId === req.user.id && role !== 'admin') {
+      return res.status(400).json({ success: false, error: 'Cannot demote your own administrator account' });
+    }
+
+    const { data: targetUser } = await supabaseAdmin
+      .from('profiles')
+      .select('id, role')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (!targetUser) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const oldRole = targetUser.role;
+
+    const { data: user, error } = await supabaseAdmin
+      .from('profiles')
+      .update({ role, updated_at: new Date().toISOString() })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
+
+    await supabaseAdmin
+      .from('audit_log')
+      .insert([{
+        actor_id: req.user.id,
+        action: 'USER_ROLE_CHANGED',
+        entity_type: 'profile',
+        entity_id: userId,
+        old_data: { role: oldRole },
+        new_data: { role },
+        created_at: new Date().toISOString(),
+      }]);
+
+    res.json({
+      success: true,
+      message: `User role updated to ${role}`,
+      user,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Helper: Generate short-lived signed URL (5 minutes) for KYC documents
+const createKycSignedUrl = async (pathOrUrl) => {
+  if (!pathOrUrl) return null;
+  const objectPath = pathOrUrl.includes('/kyc-documents/')
+    ? pathOrUrl.split('/kyc-documents/')[1].split('?')[0]
+    : pathOrUrl;
+  try {
+    const { data } = await supabaseAdmin.storage
+      .from('kyc-documents')
+      .createSignedUrl(objectPath, 300);
+    return data?.signedUrl || null;
+  } catch (e) {
+    return null;
+  }
+};
+
+// 4. List KYC Verification Queue (Phase 1.6: 5-minute signed URLs for admin)
 const listKycSubmissions = async (req, res, next) => {
   try {
     const { status = 'pending' } = req.query;
@@ -140,31 +237,47 @@ const listKycSubmissions = async (req, res, next) => {
       return res.status(400).json({ success: false, error: error.message });
     }
 
-    console.log('[listKycSubmissions Success]:', users?.length, 'items found for status', status);
-
-    // Ensure documents have valid accessible URLs
-    const formatted = (users || []).map((u) => {
-      let docUrl = u.kyc_document_url;
-      let selfieUrl = u.kyc_selfie_url;
-
-      if (docUrl && !docUrl.startsWith('http')) {
-        const { data } = supabaseAdmin.storage.from('kyc-documents').getPublicUrl(docUrl);
-        docUrl = data?.publicUrl || docUrl;
-      }
-
-      if (selfieUrl && !selfieUrl.startsWith('http')) {
-        const { data } = supabaseAdmin.storage.from('kyc-documents').getPublicUrl(selfieUrl);
-        selfieUrl = data?.publicUrl || selfieUrl;
-      }
+    // Generate 5-minute signed URLs for private KYC documents
+    const formatted = await Promise.all((users || []).map(async (u) => {
+      const docSignedUrl = await createKycSignedUrl(u.kyc_document_url);
+      const selfieSignedUrl = await createKycSignedUrl(u.kyc_selfie_url);
 
       return {
         ...u,
-        kyc_document_url: docUrl,
-        kyc_selfie_url: selfieUrl,
+        kyc_document_url: docSignedUrl,
+        kyc_selfie_url: selfieSignedUrl,
       };
-    });
+    }));
 
     res.json({ success: true, submissions: formatted });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// 4.1 Get Signed URLs for a specific user's KYC submission (Admin only, 5 min expiry)
+const getKycSignedUrls = async (req, res, next) => {
+  try {
+    const { userId } = req.params;
+    const { data: user, error } = await supabaseAdmin
+      .from('profiles')
+      .select('id, kyc_document_url, kyc_selfie_url, kyc_status')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (error || !user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const docSignedUrl = await createKycSignedUrl(user.kyc_document_url);
+    const selfieSignedUrl = await createKycSignedUrl(user.kyc_selfie_url);
+
+    res.json({
+      success: true,
+      document_url: docSignedUrl,
+      selfie_url: selfieSignedUrl,
+      expires_in: 300,
+    });
   } catch (error) {
     next(error);
   }
@@ -276,7 +389,9 @@ module.exports = {
   getDashboardMetrics,
   listUsers,
   toggleUserBan,
+  updateUserRole,
   listKycSubmissions,
+  getKycSignedUrls,
   reviewKyc,
   listReports,
   resolveReport,

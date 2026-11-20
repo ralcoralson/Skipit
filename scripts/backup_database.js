@@ -17,7 +17,9 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 
 async function runBackup() {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupDir = path.resolve('backups');
+  const backupDir = process.env.BACKUP_DIR
+    ? path.resolve(process.env.BACKUP_DIR)
+    : path.resolve('backups');
   if (!fs.existsSync(backupDir)) {
     fs.mkdirSync(backupDir, { recursive: true });
   }

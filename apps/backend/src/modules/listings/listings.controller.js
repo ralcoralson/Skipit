@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require('../../config/supabase');
 const { uploadToSupabaseStorage } = require('../../middleware/upload');
+const { sanitizeSearchText, validateUUID } = require('../../utils/filterSanitizer');
 
 // 1. Get Listings with Search, Filters, Sorting & Pagination
 const getListings = async (req, res, next) => {
@@ -24,9 +25,12 @@ const getListings = async (req, res, next) => {
       .select('*, owner:profiles!listings_owner_id_fkey(id, full_name, avatar_url, rating, is_verified, trust_score)', { count: 'exact' })
       .eq('is_active', true);
 
-    // Keyword search
+    // Keyword search with filter injection protection
     if (q) {
-      query = query.or(`title.ilike.%${q}%,description.ilike.%${q}%,location_name.ilike.%${q}%`);
+      const cleanQ = sanitizeSearchText(q);
+      if (cleanQ) {
+        query = query.or(`title.ilike.%${cleanQ}%,description.ilike.%${cleanQ}%,location_name.ilike.%${cleanQ}%`);
+      }
     }
 
     // Category filter
@@ -322,9 +326,20 @@ const updateListing = async (req, res, next) => {
       return res.status(403).json({ success: false, error: 'Not authorized to edit this listing' });
     }
 
+    // Role guard: Only admins may change is_active or is_featured
+    if ((req.body.is_active !== undefined || req.body.is_featured !== undefined) && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only administrators may alter is_active or is_featured listing status',
+      });
+    }
+
     const updates = { ...req.body };
     delete updates.id;
     delete updates.owner_id;
+    delete updates.views_count;
+    delete updates.saves_count;
+    delete updates.created_at;
 
     // Process new images if uploaded
     if (req.files && req.files.length > 0) {

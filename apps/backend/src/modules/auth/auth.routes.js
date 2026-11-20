@@ -3,7 +3,7 @@ const router = express.Router();
 const authController = require('./auth.controller');
 const { requireAuth } = require('../../middleware/auth');
 const { authLimiter } = require('../../middleware/rateLimiter');
-const { upload } = require('../../middleware/upload');
+const { upload, kycUpload } = require('../../middleware/upload');
 const { validate, sendOtpSchema, verifyOtpSchema } = require('../../middleware/validate');
 
 // Auth routes
@@ -20,7 +20,7 @@ router.post('/avatar', requireAuth, upload.single('avatar'), authController.uplo
 router.post(
   '/kyc/submit',
   requireAuth,
-  upload.fields([
+  kycUpload.fields([
     { name: 'document', maxCount: 1 },
     { name: 'selfie', maxCount: 1 },
   ]),

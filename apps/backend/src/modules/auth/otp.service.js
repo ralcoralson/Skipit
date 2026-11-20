@@ -5,7 +5,7 @@ const { supabaseAdmin } = require('../../config/supabase');
 const OTP_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_OTP_ATTEMPTS = 3;
 
-// In-memory cache for fast lookups; synced with Supabase for multi-instance deployments
+// In-memory cache fallback for fast local development
 const memoryOtpCache = new Map();
 
 /**
@@ -13,7 +13,7 @@ const memoryOtpCache = new Map();
  */
 const hashOtp = (phone, otp) => {
   return crypto
-    .createHmac('sha256', config.jwtSecret)
+    .createHmac('sha256', config.jwtSecret || 'fallback_skipit_otp_hmac_secret_key_32_chars')
     .update(`${phone}:${otp}`)
     .digest('hex');
 };
@@ -23,7 +23,6 @@ const hashOtp = (phone, otp) => {
  */
 const dispatchSms = async (phone, otp) => {
   const provider = (process.env.SMS_PROVIDER || 'mock').toLowerCase();
-
   const message = `Your SkipIt verification code is ${otp}. Valid for 5 minutes. Do not share this code.`;
 
   try {
@@ -105,25 +104,24 @@ const dispatchSms = async (phone, otp) => {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            variables_values: otp,
             route: 'otp',
+            variables_values: otp,
             numbers: cleanPhone,
           }),
         });
 
         const resData = await response.json();
         if (!resData.return) {
-          throw new Error(`Fast2SMS error: ${resData.message || 'Dispatch failed'}`);
+          throw new Error(`Fast2SMS error: ${resData.message}`);
         }
-        console.log(`[SMS Engine] Fast2SMS OTP dispatched successfully to ${phone}`);
+        console.log(`[SMS Engine] Fast2SMS OTP dispatched successfully to ${cleanPhone}`);
         return { success: true, provider: 'fast2sms' };
       }
 
       case 'mock':
       default: {
-        // Safe logging in development/staging
-        if (process.env.NODE_ENV === 'production') {
-          console.warn('[SECURITY WARNING] SMS_PROVIDER is set to mock in production. Set SMS_PROVIDER to twilio/msg91/fast2sms for real carrier delivery.');
+        if (config.isProduction) {
+          console.warn('[SECURITY WARNING] SMS_PROVIDER is set to mock in production. Set SMS_PROVIDER to real carrier delivery.');
         } else {
           console.log(`[SMS Engine Mock] Generated OTP for ${phone}: ${otp}`);
         }
@@ -137,80 +135,79 @@ const dispatchSms = async (phone, otp) => {
 };
 
 /**
- * Generate and store a new secure OTP
+ * Generate and store a new secure OTP in dedicated otp_sessions table (Phase 1.8)
  */
 const generateAndStoreOtp = async (phone) => {
-  // Generate secure 6-digit number between 100000 and 999999
   const otp = crypto.randomInt(100000, 1000000).toString();
   const hashed = hashOtp(phone, otp);
-  const expiresAt = Date.now() + OTP_EXPIRY_MS;
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MS).toISOString();
 
-  const sessionData = {
+  // 1. Store in memory cache
+  memoryOtpCache.set(phone, {
     phone,
-    otp_hash: hashed,
+    code_hash: hashed,
     expires_at: expiresAt,
     attempts: 0,
     created_at: new Date().toISOString(),
-  };
+  });
 
-  // 1. Store in memory cache
-  memoryOtpCache.set(phone, sessionData);
-
-  // 2. Persist across instances in Supabase audit_log
+  // 2. Persist in dedicated otp_sessions table
   try {
-    await supabaseAdmin.from('audit_log').insert([{
-      action: 'OTP_SESSION',
-      entity_type: 'otp',
-      entity_id: '00000000-0000-0000-0000-000000000000',
-      new_data: sessionData,
+    await supabaseAdmin.from('otp_sessions').insert([{
+      phone,
+      code_hash: hashed,
+      attempts: 0,
+      expires_at: expiresAt,
+      consumed_at: null,
       created_at: new Date().toISOString(),
     }]);
   } catch (e) {
-    console.warn('[OTP Persistence Warning]:', e.message);
+    console.warn('[OTP Sessions Persistence Warning]:', e.message);
   }
 
   // 3. Dispatch via SMS provider
   await dispatchSms(phone, otp);
 
-  // In non-production environments, provide generated code in response for automated testing
-  const isDevAllowed = process.env.NODE_ENV !== 'production';
+  // Return dev OTP ONLY if ENABLE_DEV_OTP=true AND NODE_ENV is not production
+  const returnDevOtp = config.enableDevOtp;
 
   return {
     expiresInSeconds: Math.floor(OTP_EXPIRY_MS / 1000),
-    devOtp: isDevAllowed ? otp : undefined,
+    devOtp: returnDevOtp ? otp : undefined,
   };
 };
 
 /**
- * Verify OTP with expiry, attempt throttling, and cross-instance check
+ * Verify OTP with dedicated otp_sessions table, attempt throttling, expiry, and replay defense
  */
 const verifyStoredOtp = async (phone, submittedOtp) => {
-  const isDevAllowed = process.env.NODE_ENV !== 'production' && process.env.ENABLE_DEV_OTP === 'true';
+  const isDevAllowed = config.enableDevOtp;
 
-  // 1. Check in-memory cache first
-  let session = memoryOtpCache.get(phone);
+  // 1. Query dedicated otp_sessions table for latest unconsumed session
+  let session = null;
+  try {
+    const { data: records, error } = await supabaseAdmin
+      .from('otp_sessions')
+      .select('*')
+      .eq('phone', phone)
+      .is('consumed_at', null)
+      .order('created_at', { ascending: false })
+      .limit(1);
 
-  // 2. If not in memory, query cross-instance record from Supabase
-  if (!session) {
-    try {
-      const { data: records } = await supabaseAdmin
-        .from('audit_log')
-        .select('*')
-        .eq('action', 'OTP_SESSION')
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      const match = records?.find((r) => r.new_data?.phone === phone);
-      if (match) {
-        session = match.new_data;
-      }
-    } catch (e) {
-      console.warn('[OTP Fetch Warning]:', e.message);
+    if (!error && records && records.length > 0) {
+      session = records[0];
     }
+  } catch (e) {
+    console.warn('[OTP Sessions Query Warning]:', e.message);
   }
 
-  // If developer fallback is enabled in dev/test environment
+  // Fallback to memory cache if DB unavailable (e.g. offline unit testing)
   if (!session) {
+    session = memoryOtpCache.get(phone);
+  }
+
+  if (!session) {
+    // Only in development if explicitly configured
     if (isDevAllowed && submittedOtp === '123456') {
       console.log(`[OTP Verification] Accepted dev code 123456 for ${phone} (Development Mode Only)`);
       return { valid: true };
@@ -218,13 +215,14 @@ const verifyStoredOtp = async (phone, submittedOtp) => {
     return { valid: false, error: 'No active OTP verification session found. Please request a new code.' };
   }
 
-  // 3. Check Expiry
-  if (Date.now() > session.expires_at) {
+  // 2. Check Expiry
+  const expiryTime = new Date(session.expires_at).getTime();
+  if (Date.now() > expiryTime) {
     memoryOtpCache.delete(phone);
-    return { valid: false, error: 'OTP has expired. Please request a new verification code.' };
+    return { valid: false, error: 'Verification code has expired. Please request a new code.' };
   }
 
-  // 4. Check Attempt Limits
+  // 3. Check Attempt Limits
   if (session.attempts >= MAX_OTP_ATTEMPTS) {
     memoryOtpCache.delete(phone);
     return {
@@ -233,27 +231,45 @@ const verifyStoredOtp = async (phone, submittedOtp) => {
     };
   }
 
-  // 5. Compare Hashed OTP
-  const submittedHash = hashOtp(phone, submittedOtp);
-  const isMatch = crypto.timingSafeEqual(
-    Buffer.from(submittedHash, 'hex'),
-    Buffer.from(session.otp_hash, 'hex')
-  );
+  // 4. Update attempt count in DB
+  const nextAttempts = (session.attempts || 0) + 1;
+  session.attempts = nextAttempts;
+  if (session.id) {
+    await supabaseAdmin
+      .from('otp_sessions')
+      .update({ attempts: nextAttempts })
+      .eq('id', session.id);
+  }
 
-  // Also allow dev OTP strictly in dev mode if flag enabled
+  // 5. Compare Hashed OTP securely
+  const submittedHash = hashOtp(phone, submittedOtp);
+  let isMatch = false;
+  try {
+    isMatch = crypto.timingSafeEqual(
+      Buffer.from(submittedHash, 'hex'),
+      Buffer.from(session.code_hash, 'hex')
+    );
+  } catch (cmpErr) {
+    isMatch = false;
+  }
+
   const devCodeMatch = isDevAllowed && submittedOtp === '123456';
 
   if (!isMatch && !devCodeMatch) {
-    session.attempts += 1;
-    memoryOtpCache.set(phone, session);
-    const remaining = MAX_OTP_ATTEMPTS - session.attempts;
+    const remaining = Math.max(0, MAX_OTP_ATTEMPTS - nextAttempts);
     return {
       valid: false,
       error: `Invalid verification code. ${remaining} attempt(s) remaining.`,
     };
   }
 
-  // Verification succeeded - clear session to prevent replay attacks
+  // 6. Mark session as consumed to prevent replay attacks
+  if (session.id) {
+    await supabaseAdmin
+      .from('otp_sessions')
+      .update({ consumed_at: new Date().toISOString() })
+      .eq('id', session.id);
+  }
   memoryOtpCache.delete(phone);
 
   return { valid: true };

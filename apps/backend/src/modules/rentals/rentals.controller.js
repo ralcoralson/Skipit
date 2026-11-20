@@ -220,13 +220,15 @@ const getRentalRequestById = async (req, res, next) => {
     const { id } = req.params;
     const userId = req.user.id;
 
+    const safeProfileColumns = 'id, full_name, avatar_url, bio, location, rating, trust_score, is_verified, total_rentals, total_listings, total_reviews, phone, phone_number, created_at';
+
     const { data: rentalRequest, error } = await supabaseAdmin
       .from('rental_requests')
       .select(`
         *,
         listing:listings(*),
-        owner:profiles!rental_requests_owner_id_fkey(*),
-        renter:profiles!rental_requests_renter_id_fkey(*)
+        owner:profiles!rental_requests_owner_id_fkey(${safeProfileColumns}),
+        renter:profiles!rental_requests_renter_id_fkey(${safeProfileColumns})
       `)
       .eq('id', id)
       .single();
@@ -237,6 +239,19 @@ const getRentalRequestById = async (req, res, next) => {
 
     if (rentalRequest.owner_id !== userId && rentalRequest.renter_id !== userId && req.user.role !== 'admin') {
       return res.status(403).json({ success: false, error: 'Unauthorized to view this rental request.' });
+    }
+
+    // Phone numbers only revealed once request is accepted (Phase 1.5b)
+    const isAccepted = rentalRequest.request_status === 'accepted';
+    if (!isAccepted) {
+      if (rentalRequest.owner) {
+        delete rentalRequest.owner.phone;
+        delete rentalRequest.owner.phone_number;
+      }
+      if (rentalRequest.renter) {
+        delete rentalRequest.renter.phone;
+        delete rentalRequest.renter.phone_number;
+      }
     }
 
     res.json({

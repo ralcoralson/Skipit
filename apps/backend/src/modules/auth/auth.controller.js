@@ -1,8 +1,12 @@
 const jwt = require('jsonwebtoken');
+const { OAuth2Client } = require('google-auth-library');
 const { supabaseAdmin } = require('../../config/supabase');
 const config = require('../../config/env');
 const { uploadToSupabaseStorage } = require('../../middleware/upload');
 const { generateAndStoreOtp, verifyStoredOtp } = require('./otp.service');
+const { normalizePhone } = require('../../utils/filterSanitizer');
+
+const googleOAuthClient = new OAuth2Client();
 
 const generateToken = (user) => {
   return jwt.sign(
@@ -17,74 +21,87 @@ const generateToken = (user) => {
   );
 };
 
-// 0. Google Authentication (100% Free, Zero-SMS Gateway Cost)
+// 0. Google Authentication (Cryptographic verification via Google OAuth2 ID Token)
 const googleAuth = async (req, res, next) => {
   try {
-    const { credential, id_token, email: directEmail, full_name: directName, avatar_url: directAvatar } = req.body;
+    const { credential, id_token } = req.body;
+    const token = credential || id_token;
 
-    let email = directEmail;
-    let full_name = directName;
-    let avatar_url = directAvatar;
-
-    // Decode Google JWT if credential or id_token is provided
-    const tokenToDecode = credential || id_token;
-    if (tokenToDecode && typeof tokenToDecode === 'string') {
-      try {
-        const decoded = jwt.decode(tokenToDecode);
-        if (decoded && decoded.email) {
-          email = decoded.email;
-          full_name = decoded.name || decoded.full_name || full_name;
-          avatar_url = decoded.picture || decoded.avatar_url || avatar_url;
-        }
-      } catch (e) {
-        console.warn('[Google Auth] Could not decode Google JWT token:', e.message);
-      }
-    }
-
-    if (!email) {
+    // Strict validation: Reject plain email/name input entirely (Phase 1.1)
+    if (!token || typeof token !== 'string') {
       return res.status(400).json({
         success: false,
-        error: 'Email is required for Google Sign-In',
+        error: 'Google ID token (credential or id_token) is required',
       });
     }
 
-    const cleanEmail = email.toLowerCase().trim();
-    console.log(`[Google Auth] Processing sign-in request for: ${cleanEmail}`);
-
-    // Check if user already exists in Supabase Auth
-    let userId = null;
+    // Verify cryptographic signature with Google Auth Library
+    let payload = null;
     try {
-      const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
-      if (!listErr && listData?.users) {
-        const existingUser = listData.users.find((u) => u.email?.toLowerCase() === cleanEmail);
-        if (existingUser) {
-          userId = existingUser.id;
-        }
-      }
-    } catch (e) {
-      console.warn('[Google Auth List Users]', e.message);
+      const ticket = await googleOAuthClient.verifyIdToken({
+        idToken: token,
+        audience: config.googleClientIds.length > 0 ? config.googleClientIds : undefined,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      return res.status(401).json({
+        success: false,
+        error: `Invalid Google ID token: ${verifyErr.message}`,
+      });
     }
 
-    // Provision in Supabase Auth if not found
-    if (!userId) {
+    if (!payload || !payload.email) {
+      return res.status(401).json({
+        success: false,
+        error: 'Google ID token payload does not contain a valid email address',
+      });
+    }
+
+    // Require verified email address from Google
+    if (!payload.email_verified) {
+      return res.status(403).json({
+        success: false,
+        error: 'Google account email is not verified',
+      });
+    }
+
+    const cleanEmail = payload.email.toLowerCase().trim();
+    const fullName = payload.name || payload.given_name || cleanEmail.split('@')[0];
+    const avatarUrl = payload.picture || null;
+
+    // Direct lookup by email without loading the full user list into memory
+    let userId = null;
+    const { data: existingProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('id, email, full_name, avatar_url, role, is_banned')
+      .eq('email', cleanEmail)
+      .maybeSingle();
+
+    if (existingProfile) {
+      userId = existingProfile.id;
+    } else {
+      // Provision in Supabase Auth if no profile exists
       const randomPassword = `SkipIt_Google_${Math.random().toString(36).substring(2, 12)}!`;
       const { data: newAuthUser, error: createAuthErr } = await supabaseAdmin.auth.admin.createUser({
         email: cleanEmail,
         password: randomPassword,
         email_confirm: true,
         user_metadata: {
-          full_name: full_name || cleanEmail.split('@')[0],
-          avatar_url: avatar_url || null,
+          full_name: fullName,
+          avatar_url: avatarUrl,
           email_verified: true,
           provider: 'google',
         },
       });
 
       if (createAuthErr) {
-        console.warn('[Google Auth Create User Warning]:', createAuthErr.message);
-        const { data: listAgain } = await supabaseAdmin.auth.admin.listUsers();
-        const found = listAgain?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
-        userId = found ? found.id : null;
+        // If user already existed in auth, query by email
+        const { data: fallbackProfile } = await supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+        userId = fallbackProfile?.id || null;
       } else {
         userId = newAuthUser?.user?.id;
       }
@@ -94,7 +111,7 @@ const googleAuth = async (req, res, next) => {
       return res.status(500).json({ success: false, error: 'Could not provision Google user account' });
     }
 
-    // Retrieve or create profile entry
+    // Retrieve or create profile entry with kyc_status 'unverified' (NOT 'none')
     let { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('*')
@@ -106,14 +123,15 @@ const googleAuth = async (req, res, next) => {
         .from('profiles')
         .upsert({
           id: userId,
-          full_name: full_name || cleanEmail.split('@')[0],
-          avatar_url: avatar_url || null,
+          email: cleanEmail,
+          full_name: fullName,
+          avatar_url: avatarUrl,
           location: 'Bengaluru, India',
           role: 'user',
           rating: 5.0,
           trust_score: 75,
           is_verified: true,
-          kyc_status: 'none',
+          kyc_status: 'unverified', // Valid per DB check constraint
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -125,10 +143,10 @@ const googleAuth = async (req, res, next) => {
       }
       profile = newProfile;
     } else {
-      // Sync avatar or verified status if improved
       const updates = {};
-      if (!profile.avatar_url && avatar_url) updates.avatar_url = avatar_url;
-      if ((!profile.full_name || profile.full_name === 'SkipIt Member') && full_name) updates.full_name = full_name;
+      if (!profile.avatar_url && avatarUrl) updates.avatar_url = avatarUrl;
+      if (!profile.email) updates.email = cleanEmail;
+      if ((!profile.full_name || profile.full_name === 'SkipIt Member') && fullName) updates.full_name = fullName;
       if (!profile.is_verified) updates.is_verified = true;
       if (Object.keys(updates).length > 0) {
         updates.updated_at = new Date().toISOString();
@@ -149,23 +167,24 @@ const googleAuth = async (req, res, next) => {
       });
     }
 
-    const token = generateToken({
+    const tokenPayload = {
       id: userId,
       email: cleanEmail,
       role: profile?.role || 'user',
-    });
+    };
+    const authToken = generateToken(tokenPayload);
 
     console.log(`[Google Auth Success]: Authenticated ${cleanEmail} (ID: ${userId})`);
 
     res.json({
       success: true,
       message: 'Signed in with Google successfully',
-      token,
+      token: authToken,
       user: {
         ...(profile || {}),
         id: userId,
         email: cleanEmail,
-        full_name: profile?.full_name || full_name || cleanEmail.split('@')[0],
+        full_name: profile?.full_name || fullName || cleanEmail.split('@')[0],
       },
     });
   } catch (error) {
@@ -247,7 +266,7 @@ const register = async (req, res, next) => {
   }
 };
 
-// 2. Login with Password or Mobile
+// 2. Login with Password or Mobile (Phase 1.2: Normalized phone & parameterized queries)
 const login = async (req, res, next) => {
   try {
     const { email, phone, password } = req.body;
@@ -255,17 +274,27 @@ const login = async (req, res, next) => {
     let targetEmail = email;
 
     if (!targetEmail && phone) {
-      // Find user by phone in profiles
-      const { data: profile } = await supabaseAdmin
+      const cleanPhone = normalizePhone(phone);
+      // Find user by phone without PostgREST .or() filter injection
+      let { data: profile } = await supabaseAdmin
         .from('profiles')
         .select('*')
-        .or(`phone.eq.${phone},phone_number.eq.${phone}`)
+        .eq('phone', cleanPhone)
         .maybeSingle();
 
+      if (!profile) {
+        const { data: profileByNum } = await supabaseAdmin
+          .from('profiles')
+          .select('*')
+          .eq('phone_number', cleanPhone)
+          .maybeSingle();
+        profile = profileByNum;
+      }
+
       if (profile) {
-        targetEmail = profile.email || `${phone.replace(/\D/g, '')}@skipit.local`;
+        targetEmail = profile.email || `${cleanPhone.replace(/\D/g, '')}@skipit.local`;
       } else {
-        targetEmail = `${phone.replace(/\D/g, '')}@skipit.local`;
+        targetEmail = `${cleanPhone.replace(/\D/g, '')}@skipit.local`;
       }
     }
 
@@ -317,7 +346,7 @@ const login = async (req, res, next) => {
   }
 };
 
-// 3. Send Mobile OTP (Multi-Provider SMS + Cryptographic Expiry Engine)
+// 3. Send Mobile OTP (Multi-Provider SMS + Dedicated Table Storage)
 const sendOtp = async (req, res, next) => {
   try {
     const { phone } = req.body;
@@ -325,11 +354,7 @@ const sendOtp = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Phone number is required' });
     }
 
-    const cleanPhone = phone.trim();
-    if (cleanPhone.replace(/\D/g, '').length < 10) {
-      return res.status(400).json({ success: false, error: 'Please enter a valid 10-digit phone number' });
-    }
-
+    const cleanPhone = normalizePhone(phone);
     const { expiresInSeconds, devOtp } = await generateAndStoreOtp(cleanPhone);
 
     res.json({
@@ -343,7 +368,7 @@ const sendOtp = async (req, res, next) => {
   }
 };
 
-// 4. Verify OTP with Attempt Throttling & Replay Defense
+// 4. Verify OTP with Attempt Throttling & Replay Defense (No .or() filter injection)
 const verifyOtp = async (req, res, next) => {
   try {
     const { phone, otp, full_name } = req.body;
@@ -352,7 +377,7 @@ const verifyOtp = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Phone number and verification code are required' });
     }
 
-    const cleanPhone = phone.trim();
+    const cleanPhone = normalizePhone(phone);
     const verificationResult = await verifyStoredOtp(cleanPhone, otp.trim());
 
     if (!verificationResult.valid) {
@@ -362,65 +387,94 @@ const verifyOtp = async (req, res, next) => {
       });
     }
 
-    // Check if user exists with this phone
+    // Check if user exists with this phone without .or() strings
     let { data: profile } = await supabaseAdmin
       .from('profiles')
       .select('*')
-      .or(`phone.eq.${cleanPhone},phone_number.eq.${cleanPhone}`)
+      .eq('phone', cleanPhone)
       .maybeSingle();
+
+    if (!profile) {
+      const { data: profileByNum } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .eq('phone_number', cleanPhone)
+        .maybeSingle();
+      profile = profileByNum;
+    }
 
     let userId = profile ? profile.id : null;
 
     if (!profile) {
       // Auto-provision user account
-      const cleanPhone = phone.replace(/\D/g, '');
-      const syntheticEmail = `${cleanPhone}@skipit.local`;
+      const digitsOnly = cleanPhone.replace(/\D/g, '');
+      const syntheticEmail = `${digitsOnly}@skipit.local`;
       const randomPassword = `SkipIt_${Math.random().toString(36).substring(2, 12)}!`;
 
       const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
         email: syntheticEmail,
         password: randomPassword,
-        email_confirm: true,
         phone: cleanPhone,
+        email_confirm: true,
+        phone_confirm: true,
+        user_metadata: {
+          full_name: full_name || `SkipIt Member ${digitsOnly.slice(-4)}`,
+        },
       });
 
-      if (createErr || !newUser?.user) {
-        // Find existing user if auth created but profile missing
-        const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
-        const found = listData?.users?.find(u => u.email === syntheticEmail || u.phone === cleanPhone);
-        userId = found ? found.id : null;
-      } else {
-        userId = newUser.user.id;
-      }
-
-      if (userId) {
-        const { data: createdProfile } = await supabaseAdmin
+      if (createErr) {
+        // Fallback if auth already created
+        const { data: fallbackUser } = await supabaseAdmin
           .from('profiles')
-          .upsert({
-            id: userId,
-            full_name: full_name || `Member ${cleanPhone.slice(-4)}`,
-            phone: cleanPhone,
-            phone_number: cleanPhone,
-            email: syntheticEmail,
-            location: 'Bengaluru, India',
-            is_verified: true, // Phone verified
-            trust_score: 60,
-            role: 'user',
-          })
-          .select()
-          .single();
-
-        profile = createdProfile;
+          .select('id')
+          .eq('phone', cleanPhone)
+          .maybeSingle();
+        userId = fallbackUser?.id || null;
+      } else {
+        userId = newUser?.user?.id;
       }
+
+      if (!userId) {
+        return res.status(500).json({ success: false, error: 'Failed to provision user profile' });
+      }
+
+      // Create new profile with kyc_status 'unverified'
+      const { data: createdProfile, error: profileError } = await supabaseAdmin
+        .from('profiles')
+        .upsert({
+          id: userId,
+          full_name: full_name || `SkipIt Member ${digitsOnly.slice(-4)}`,
+          email: syntheticEmail,
+          phone: cleanPhone,
+          phone_number: cleanPhone,
+          location: 'Bengaluru, India',
+          role: 'user',
+          rating: 5.0,
+          trust_score: 50,
+          is_verified: false,
+          kyc_status: 'unverified',
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      profile = createdProfile;
     }
 
-    const token = generateToken(profile || { id: userId, phone });
+    if (profile?.is_banned) {
+      return res.status(403).json({
+        success: false,
+        error: 'Your account has been suspended by administration',
+      });
+    }
+
+    const token = generateToken(profile || { id: userId, phone: cleanPhone });
 
     res.json({
       success: true,
       message: 'Phone verified successfully',
       token,
-      user: profile || { id: userId, phone },
+      user: profile,
     });
   } catch (error) {
     next(error);
@@ -562,23 +616,75 @@ const submitKyc = async (req, res, next) => {
   }
 };
 
-// 9. Delete Account
+// 9. Delete Account (Phase 3.4 & Phase 1: Storage cleanup and safe idempotent execution)
 const deleteAccount = async (req, res, next) => {
   try {
-    // Soft ban or delete
+    const userId = req.user.id;
+
+    // Fetch profile to find storage objects
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('avatar_url, kyc_document_url, kyc_selfie_url')
+      .eq('id', userId)
+      .maybeSingle();
+
+    // Clean up avatar from storage
+    if (profile?.avatar_url) {
+      const avatarPath = profile.avatar_url.includes('/avatars/')
+        ? profile.avatar_url.split('/avatars/')[1].split('?')[0]
+        : profile.avatar_url;
+      try {
+        await supabaseAdmin.storage.from('avatars').remove([avatarPath]);
+      } catch (err) {
+        console.warn('[Storage Cleanup Avatar Warning]:', err.message);
+      }
+    }
+
+    // Clean up KYC documents from storage
+    const kycFilesToRemove = [];
+    if (profile?.kyc_document_url) {
+      const docPath = profile.kyc_document_url.includes('/kyc-documents/')
+        ? profile.kyc_document_url.split('/kyc-documents/')[1].split('?')[0]
+        : profile.kyc_document_url;
+      kycFilesToRemove.push(docPath);
+    }
+    if (profile?.kyc_selfie_url) {
+      const selfiePath = profile.kyc_selfie_url.includes('/kyc-documents/')
+        ? profile.kyc_selfie_url.split('/kyc-documents/')[1].split('?')[0]
+        : profile.kyc_selfie_url;
+      kycFilesToRemove.push(selfiePath);
+    }
+    if (kycFilesToRemove.length > 0) {
+      try {
+        await supabaseAdmin.storage.from('kyc-documents').remove(kycFilesToRemove);
+      } catch (err) {
+        console.warn('[Storage Cleanup KYC Warning]:', err.message);
+      }
+    }
+
+    // Deactivate user's listings
     await supabaseAdmin
       .from('listings')
       .update({ is_active: false, is_available: false })
-      .eq('owner_id', req.user.id);
+      .eq('owner_id', userId);
 
+    // Anonymize and soft-ban profile (idempotent: safe to run repeatedly)
     await supabaseAdmin
       .from('profiles')
-      .update({ is_banned: true, full_name: 'Deleted User', bio: 'Account closed' })
-      .eq('id', req.user.id);
+      .update({
+        is_banned: true,
+        full_name: 'Deleted User',
+        bio: 'Account closed',
+        avatar_url: null,
+        kyc_document_url: null,
+        kyc_selfie_url: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
 
     res.json({
       success: true,
-      message: 'Account deleted successfully',
+      message: 'Account and associated personal storage data deleted successfully',
     });
   } catch (error) {
     next(error);

@@ -24,10 +24,20 @@ const ticketsRoutes = require('./modules/tickets/tickets.routes');
 
 const app = express();
 
+// Trust reverse proxy (e.g. Render, Railway, Cloudflare)
+app.set('trust proxy', 1);
+
 // Security & utility middleware
 app.use(helmet());
 app.use(cors({
-  origin: '*', // Allow mobile apps & web frontend in dev/prod
+  origin: (origin, callback) => {
+    // Allow requests with no Origin header (mobile applications, native clients, server-to-server)
+    if (!origin) return callback(null, true);
+    if (config.corsOrigin.includes('*') || config.corsOrigin.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS policy violation: Origin '${origin}' is not in the allowed list`));
+  },
   credentials: true,
 }));
 app.use(express.json({ limit: '15mb' }));

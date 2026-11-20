@@ -26,6 +26,9 @@
     "express",
     "supabase"
   ],
+  "overrides": {
+    "postcss": "^8.5.33"
+  },
   "author": "SkipIt Team",
   "license": "ISC"
 }

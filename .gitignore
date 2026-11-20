@@ -57,6 +57,7 @@ logs/
 
 # Audit export
 audit-export/
+backups/
 
 # OS
 .DS_Store

@@ -70,23 +70,70 @@ const initWebSocketServer = (server) => {
             break;
           }
 
-          // 2. Real-time Message Send
+          // 2. Real-time Message Send (Phase 1.10: Rate limit, block check, receiver check, 2000 cap)
           case 'send_message': {
             if (!ws.userId) {
               return ws.send(JSON.stringify({ type: 'error', error: 'Not authenticated on WebSocket' }));
             }
 
-            const { receiver_id, content, listing_id } = payload;
+            // Per-connection WebSocket rate limiter (max 20 messages per 10 seconds)
+            const now = Date.now();
+            ws.messageTimestamps = (ws.messageTimestamps || []).filter((ts) => now - ts < 10000);
+            if (ws.messageTimestamps.length >= 20) {
+              return ws.send(JSON.stringify({
+                type: 'error',
+                error: 'Rate limit exceeded: Maximum 20 messages per 10 seconds allowed.',
+              }));
+            }
+            ws.messageTimestamps.push(now);
+
+            const { receiver_id, content, listing_id, rental_request_id } = payload;
             if (!receiver_id || !content) {
               return ws.send(JSON.stringify({ type: 'error', error: 'Missing receiver_id or content' }));
+            }
+
+            if (receiver_id === ws.userId) {
+              return ws.send(JSON.stringify({ type: 'error', error: 'Cannot send messages to yourself' }));
+            }
+
+            const cleanContent = String(content).trim();
+            if (cleanContent.length > 2000) {
+              return ws.send(JSON.stringify({
+                type: 'error',
+                error: 'Message content cannot exceed 2000 characters',
+              }));
+            }
+
+            // Verify receiver exists
+            const { data: receiverProfile } = await supabaseAdmin
+              .from('profiles')
+              .select('id')
+              .eq('id', receiver_id)
+              .maybeSingle();
+
+            if (!receiverProfile) {
+              return ws.send(JSON.stringify({ type: 'error', error: 'Recipient user does not exist' }));
+            }
+
+            // Check user_blocks table
+            const { data: block } = await supabaseAdmin
+              .from('user_blocks')
+              .select('id')
+              .or(`and(blocker_id.eq.${ws.userId},blocked_id.eq.${receiver_id}),and(blocker_id.eq.${receiver_id},blocked_id.eq.${ws.userId})`)
+              .maybeSingle();
+
+            if (block) {
+              return ws.send(JSON.stringify({ type: 'error', error: 'Communication with this user is blocked' }));
             }
 
             // Save to database
             const messageData = {
               sender_id: ws.userId,
               receiver_id,
-              content,
-              booking_id: null,
+              content: cleanContent,
+              booking_id: listing_id || null,
+              rental_request_id: rental_request_id || null,
+              message_type: 'text',
               is_read: false,
               created_at: new Date().toISOString(),
             };
@@ -125,7 +172,7 @@ const initWebSocketServer = (server) => {
             // Trigger in-app & FCM push notification to recipient
             notifyUser(receiver_id, {
               title: 'New Rental Chat Message',
-              body: content.length > 60 ? `${content.substring(0, 60)}...` : content,
+              body: cleanContent.length > 60 ? `${cleanContent.substring(0, 60)}...` : cleanContent,
               data: { sender_id: ws.userId, listing_id, type: 'message' },
             }).catch((err) => console.warn('[WS Notification Dispatch Error]:', err.message));
 

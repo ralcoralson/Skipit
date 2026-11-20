@@ -304,3 +304,108 @@ describe('7. Review Gating (Requirement 1.9)', () => {
     assert.ok(jsonResponse.error.includes('rental_request_id is required'));
   });
 });
+
+describe('8. Tiered Rental Pricing Calculator (Requirement 3.1)', () => {
+  const { calculateRentalPrice } = require('../src/modules/rentals/rentals.controller');
+
+  test('calculates standard daily rate when no weekly or monthly discount is set', () => {
+    const listing = { price_per_day: 150 };
+    const pricing = calculateRentalPrice(listing, 5);
+    assert.strictEqual(pricing.total_price, 750);
+    assert.strictEqual(pricing.breakdown.days, 5);
+    assert.strictEqual(pricing.breakdown.weeks, 0);
+    assert.strictEqual(pricing.breakdown.months, 0);
+  });
+
+  test('calculates tiered pricing for full weeks and remaining days', () => {
+    const listing = {
+      price_per_day: 100,
+      price_per_week: 500, // discount over 7 * 100 = 700
+    };
+    // 10 days = 1 week (500) + 3 days (300) = 800
+    const pricing = calculateRentalPrice(listing, 10);
+    assert.strictEqual(pricing.total_price, 800);
+    assert.strictEqual(pricing.breakdown.weeks, 1);
+    assert.strictEqual(pricing.breakdown.days, 3);
+  });
+
+  test('calculates tiered pricing for full months, full weeks, and remaining days', () => {
+    const listing = {
+      price_per_day: 100,
+      price_per_week: 600,
+      price_per_month: 2000,
+    };
+    // 38 days = 1 month (30 days: 2000) + 1 week (7 days: 600) + 1 day (100) = 2700
+    const pricing = calculateRentalPrice(listing, 38);
+    assert.strictEqual(pricing.total_price, 2700);
+    assert.strictEqual(pricing.breakdown.months, 1);
+    assert.strictEqual(pricing.breakdown.weeks, 1);
+    assert.strictEqual(pricing.breakdown.days, 1);
+  });
+});
+
+describe('9. User Blocking Safeguards (Requirement 3.2)', () => {
+  const { blockUser } = require('../src/modules/users/users.controller');
+
+  test('rejects blocking own user account with 400', async () => {
+    let statusCode = null;
+    let jsonResponse = null;
+
+    const selfUuid = '11111111-1111-1111-1111-111111111111';
+    const req = {
+      user: { id: selfUuid },
+      params: { id: selfUuid },
+      body: { reason: 'Test block self' },
+    };
+
+    const res = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(data) {
+        jsonResponse = data;
+        return this;
+      },
+    };
+
+    const next = (err) => {
+      if (err) {
+        statusCode = err.status || 500;
+        jsonResponse = { success: false, error: err.message };
+      }
+    };
+
+    await blockUser(req, res, next);
+
+    assert.strictEqual(statusCode, 400);
+    assert.strictEqual(jsonResponse.success, false);
+    assert.ok(jsonResponse.error.includes('cannot block your own account'));
+  });
+});
+
+describe('10. HTTPS IP Geolocation (Requirement 3.5)', () => {
+  const { getGeoFromIp } = require('../src/modules/geo/geo.controller');
+
+  test('returns local fallback location (Bengaluru) for local IP over HTTPS without cleartext leak', async () => {
+    let jsonResponse = null;
+
+    const req = {
+      headers: {},
+      socket: { remoteAddress: '127.0.0.1' },
+    };
+
+    const res = {
+      json(data) {
+        jsonResponse = data;
+        return this;
+      },
+    };
+
+    await getGeoFromIp(req, res, () => {});
+
+    assert.strictEqual(jsonResponse.success, true);
+    assert.strictEqual(jsonResponse.city, 'Bengaluru');
+    assert.strictEqual(jsonResponse.country, 'India');
+  });
+});

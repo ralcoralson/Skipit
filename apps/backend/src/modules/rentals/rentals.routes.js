@@ -11,6 +11,10 @@ router.get('/my-requests', rentalsController.getMyRequests);
 router.get('/incoming', rentalsController.getIncomingRequests);
 router.get('/:id', rentalsController.getRentalRequestById);
 router.patch('/:id/respond', rentalsController.respondRentalRequest);
+router.post('/:id/respond', rentalsController.respondRentalRequest);
 router.patch('/:id/cancel', rentalsController.cancelRentalRequest);
+router.post('/:id/cancel', rentalsController.cancelRentalRequest);
+router.post('/:id/complete', rentalsController.completeRentalRequest);
+router.patch('/:id/complete', rentalsController.completeRentalRequest);
 
 module.exports = router;

@@ -36,6 +36,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
   List<String> _images = [];
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _requiresDeposit = false;
 
   @override
   void initState() {
@@ -55,6 +56,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
     _locationCtrl.text = l.locationName;
     _minDaysCtrl.text = l.minRentalDays.toString();
     _maxDaysCtrl.text = l.maxRentalDays.toString();
+    _requiresDeposit = l.depositAmount > 0;
     _images = List.from(l.images);
     _isLoading = false;
   }
@@ -107,7 +109,7 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
         'title': _titleCtrl.text.trim(),
         'description': _descCtrl.text.trim(),
         'price_per_day': double.tryParse(_priceCtrl.text.trim()) ?? 100.0,
-        'deposit_amount': double.tryParse(_depositCtrl.text.trim()) ?? 0.0,
+        'deposit_amount': _requiresDeposit ? (double.tryParse(_depositCtrl.text.trim()) ?? 0.0) : 0.0,
         'location_name': _locationCtrl.text.trim(),
         'min_rental_days': int.tryParse(_minDaysCtrl.text.trim()) ?? 1,
         'max_rental_days': int.tryParse(_maxDaysCtrl.text.trim()) ?? 30,
@@ -184,9 +186,79 @@ class _EditListingScreenState extends ConsumerState<EditListingScreen> {
                           TextField(controller: _priceCtrl, keyboardType: TextInputType.number, style: const TextStyle(color: Colors.white, fontSize: 14)),
                           const SizedBox(height: 14),
 
-                          const Text('Security Deposit (₹)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-                          const SizedBox(height: 6),
-                          TextField(controller: _depositCtrl, keyboardType: TextInputType.number, style: const TextStyle(color: Colors.white, fontSize: 14)),
+                          // Security Deposit Decision Card
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppColors.border),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          const Text('Take Security Deposit?',
+                                              style: TextStyle(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: Colors.white)),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                              _requiresDeposit
+                                                  ? 'Hold a refundable deposit from renter'
+                                                  : 'No deposit required (0% deposit)',
+                                              style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: AppColors.textSecondary)),
+                                        ],
+                                      ),
+                                    ),
+                                    Switch.adaptive(
+                                      value: _requiresDeposit,
+                                      activeColor: AppColors.primary,
+                                      onChanged: (val) {
+                                        setState(() {
+                                          _requiresDeposit = val;
+                                          if (!val) {
+                                            _depositCtrl.text = '0';
+                                          } else if (_depositCtrl.text == '0' || _depositCtrl.text.isEmpty) {
+                                            _depositCtrl.text = '1000';
+                                          }
+                                        });
+                                      },
+                                    ),
+                                  ],
+                                ),
+                                if (_requiresDeposit) ...[
+                                  const SizedBox(height: 10),
+                                  const Divider(height: 1, color: AppColors.border),
+                                  const SizedBox(height: 10),
+                                  const Text('Refundable Security Deposit (₹) *',
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.textSecondary)),
+                                  const SizedBox(height: 6),
+                                  TextField(
+                                    controller: _depositCtrl,
+                                    keyboardType: TextInputType.number,
+                                    style: const TextStyle(
+                                        color: Colors.white, fontSize: 14),
+                                    decoration: const InputDecoration(
+                                        hintText: 'e.g. 2000',
+                                        prefixText: '₹ '),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                           const SizedBox(height: 14),
 
                           const Text('Location / Neighborhood *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),

@@ -28,6 +28,7 @@ export default function CreateListingPage() {
   const [model, setModel] = useState('');
   const [condition, setCondition] = useState('good');
   const [pricePerDay, setPricePerDay] = useState('');
+  const [requiresDeposit, setRequiresDeposit] = useState(false);
   const [depositAmount, setDepositAmount] = useState('0');
   const [locationName, setLocationName] = useState('Bengaluru, Indiranagar');
   const [minDays, setMinDays] = useState('1');
@@ -86,7 +87,7 @@ export default function CreateListingPage() {
       formData.append('description', description);
       formData.append('category', category);
       formData.append('price_per_day', pricePerDay);
-      formData.append('deposit_amount', depositAmount || '0');
+      formData.append('deposit_amount', requiresDeposit ? (depositAmount || '0') : '0');
       formData.append('condition', condition);
       formData.append('location_name', locationName);
       formData.append('min_rental_days', minDays);
@@ -284,20 +285,62 @@ export default function CreateListingPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-text-primary mb-1.5">Security Deposit (₹)</label>
-              <div className="relative">
+              <label className="block text-xs font-bold text-text-primary mb-1.5">Security Deposit Requirement</label>
+              <div className="flex items-center gap-2 p-1.5 glass-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRequiresDeposit(false);
+                    setDepositAmount('0');
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
+                    !requiresDeposit ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  No Deposit (₹0)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRequiresDeposit(true);
+                    if (depositAmount === '0') setDepositAmount('1000');
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition ${
+                    requiresDeposit ? 'bg-primary text-white shadow-xs' : 'text-text-secondary hover:text-text-primary'
+                  }`}
+                >
+                  Require Deposit
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {requiresDeposit && (
+            <div className="p-4 bg-blue-50/60 border border-blue-200/70 rounded-2xl space-y-2 animate-fade-in">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-primary-navy">
+                  Refundable Security Deposit Amount (₹) *
+                </label>
+                <span className="text-[10px] font-bold text-primary px-2 py-0.5 bg-blue-100/60 rounded-full">
+                  Settled P2P upon handover
+                </span>
+              </div>
+              <div className="relative max-w-sm">
                 <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-text-muted text-sm">₹</span>
                 <input
                   type="number"
                   value={depositAmount}
                   onChange={(e) => setDepositAmount(e.target.value)}
-                  placeholder="5000 (0 for none)"
-                  className="w-full pl-8 pr-4 py-2.5 glass-1 rounded-xl text-sm font-bold focus:border-primary outline-none"
+                  placeholder="e.g. 2000"
+                  className="w-full pl-8 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold focus:border-primary outline-none"
+                  required={requiresDeposit}
                 />
               </div>
-              <span className="text-[10px] text-text-muted mt-1 block">Deposits are settled directly between you and the renter</span>
+              <p className="text-[11px] text-text-secondary leading-relaxed">
+                Renters will pay this deposit directly to you via UPI or cash when receiving the item, and you return it upon safe inspection at the end of the rental.
+              </p>
             </div>
-          </div>
+          )}
 
           <div>
             <label className="block text-xs font-bold text-text-primary mb-1.5">Pickup Location / City *</label>

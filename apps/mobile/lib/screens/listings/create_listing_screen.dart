@@ -27,6 +27,7 @@ class _CreateListingScreenState extends ConsumerState<CreateListingScreen> {
   final _brandController = TextEditingController();
   final _modelController = TextEditingController();
 
+  bool _requiresDeposit = false;
   String _selectedCategory = 'Cameras & Photography';
   String _selectedCondition = 'good';
   final List<XFile> _selectedImages = [];
@@ -83,7 +84,7 @@ class _CreateListingScreenState extends ConsumerState<CreateListingScreen> {
         'category': _selectedCategory,
         'condition': _selectedCondition,
         'price_per_day': price,
-        'deposit_amount': _depositController.text.trim(),
+        'deposit_amount': _requiresDeposit ? (_depositController.text.trim().isEmpty ? '0' : _depositController.text.trim()) : '0',
         'location_name': location,
         'brand': _brandController.text.trim(),
         'model': _modelController.text.trim(),
@@ -382,53 +383,101 @@ class _CreateListingScreenState extends ConsumerState<CreateListingScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Pricing Row
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                    // Daily Price
+                    const Text('Daily Rental Rate (₹/day) *',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.textPrimary)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _priceController,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(
+                          fontSize: 13, color: AppColors.textPrimary),
+                      decoration: const InputDecoration(hintText: '850'),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Security Deposit Option Card
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('Daily Price (₹) *',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.textPrimary)),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: _priceController,
-                                keyboardType: TextInputType.number,
-                                style: const TextStyle(
-                                    fontSize: 13, color: AppColors.textPrimary),
-                                decoration:
-                                    const InputDecoration(hintText: '850'),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('Take Security Deposit?',
+                                        style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w800,
+                                            color: AppColors.textPrimary)),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                        _requiresDeposit
+                                            ? 'Hold a refundable deposit from renter'
+                                            : 'No deposit required (0% deposit)',
+                                        style: const TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w500,
+                                            color: AppColors.textSecondary)),
+                                  ],
+                                ),
+                              ),
+                              Switch.adaptive(
+                                value: _requiresDeposit,
+                                activeColor: AppColors.primary,
+                                onChanged: (val) {
+                                  setState(() {
+                                    _requiresDeposit = val;
+                                    if (!val) {
+                                      _depositController.text = '0';
+                                    } else if (_depositController.text == '0' || _depositController.text.isEmpty) {
+                                      _depositController.text = '1000';
+                                    }
+                                  });
+                                },
                               ),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('Deposit (₹)',
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppColors.textPrimary)),
-                              const SizedBox(height: 6),
-                              TextField(
-                                controller: _depositController,
-                                keyboardType: TextInputType.number,
-                                style: const TextStyle(
-                                    fontSize: 13, color: AppColors.textPrimary),
-                                decoration: const InputDecoration(
-                                    hintText: '0 for none'),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
+                          if (_requiresDeposit) ...[
+                            const SizedBox(height: 12),
+                            const Divider(height: 1, color: AppColors.border),
+                            const SizedBox(height: 12),
+                            const Text('Refundable Deposit Amount (₹) *',
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textPrimary)),
+                            const SizedBox(height: 6),
+                            TextField(
+                              controller: _depositController,
+                              keyboardType: TextInputType.number,
+                              style: const TextStyle(
+                                  fontSize: 13, color: AppColors.textPrimary),
+                              decoration: const InputDecoration(
+                                  hintText: 'e.g. 2000',
+                                  prefixText: '₹ '),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                                'Settled directly with renter via UPI or cash upon handover and returned after inspection.',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    color: AppColors.textSecondary)),
+                          ],
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 16),
 

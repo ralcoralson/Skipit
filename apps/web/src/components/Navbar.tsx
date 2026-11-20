@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Bell,
   Sparkles,
+  Package,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 
@@ -184,6 +185,15 @@ export default function Navbar({ onOpenAuth }: NavbarProps) {
                       </div>
 
                       <Link
+                        href="/rentals"
+                        onClick={() => setDropdownOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-primary-subtle/40 rounded-xl font-medium transition"
+                      >
+                        <Package className="w-3.5 h-3.5 text-primary" />
+                        <span>Rental Bookings</span>
+                      </Link>
+
+                      <Link
                         href="/profile"
                         onClick={() => setDropdownOpen(false)}
                         className="flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-primary-subtle/40 rounded-xl font-medium transition"
@@ -199,6 +209,15 @@ export default function Navbar({ onOpenAuth }: NavbarProps) {
                       >
                         <Heart className="w-3.5 h-3.5 text-rose-500" />
                         <span>Saved Wishlist</span>
+                      </Link>
+
+                      <Link
+                        href="/support"
+                        onClick={() => setDropdownOpen(false)}
+                        className="flex items-center gap-2 px-3 py-2 text-xs text-text-primary hover:bg-primary-subtle/40 rounded-xl font-medium transition"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-primary" />
+                        <span>Support & Helpdesk</span>
                       </Link>
 
                       {(user.role === 'admin' || user.role === 'moderator') && (

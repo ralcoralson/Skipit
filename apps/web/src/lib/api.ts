@@ -77,6 +77,33 @@ export const api = {
   createReview: (payload: any) => fetchApi('/reviews', { method: 'POST', body: JSON.stringify(payload) }),
   getUserReviews: (userId: string) => fetchApi(`/reviews/user/${userId}`),
 
+  // Rentals (Phase 5.1 & Phase 3)
+  createRentalRequest: (payload: { listing_id: string; start_date: string; end_date: string; notes?: string }) =>
+    fetchApi('/rentals', { method: 'POST', body: JSON.stringify(payload) }),
+  getMyRentals: () => fetchApi('/rentals/my-requests'),
+  getIncomingRentals: () => fetchApi('/rentals/incoming'),
+  getRental: (id: string) => fetchApi(`/rentals/${id}`),
+  respondRental: (id: string, status: 'accepted' | 'rejected', response_note?: string) =>
+    fetchApi(`/rentals/${id}/respond`, { method: 'PATCH', body: JSON.stringify({ status, response_note }) }),
+  cancelRental: (id: string) => fetchApi(`/rentals/${id}/cancel`, { method: 'PATCH' }),
+  completeRental: (id: string) => fetchApi(`/rentals/${id}/complete`, { method: 'POST' }),
+
+  // Users & Blocking (Phase 3.2 & 5.2)
+  blockUser: (userId: string, reason?: string) =>
+    fetchApi(`/users/${userId}/block`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  unblockUser: (userId: string) => fetchApi(`/users/${userId}/block`, { method: 'DELETE' }),
+  getBlockedUsers: () => fetchApi('/users/blocked'),
+  deleteAccount: () => fetchApi('/auth/account', { method: 'DELETE' }),
+  uploadAvatar: (formData: FormData) => fetchApi('/auth/avatar', { method: 'POST', body: formData }),
+
+  // Support Tickets (Phase 5.2 & 5.3)
+  getTickets: () => fetchApi('/tickets'),
+  createTicket: (payload: { subject: string; description: string; priority?: string }) =>
+    fetchApi('/tickets', { method: 'POST', body: JSON.stringify(payload) }),
+  getAdminTickets: () => fetchApi('/tickets/admin/all'),
+  updateAdminTicket: (id: string, payload: { status?: string; priority?: string; admin_notes?: string }) =>
+    fetchApi(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+
   // Reports
   submitReport: (payload: any) => fetchApi('/reports', { method: 'POST', body: JSON.stringify(payload) }),
 
@@ -92,7 +119,10 @@ export const api = {
   },
   toggleBanUser: (userId: string, is_banned: boolean, reason?: string) =>
     fetchApi(`/admin/users/${userId}/ban`, { method: 'PATCH', body: JSON.stringify({ is_banned, reason }) }),
+  updateUserRole: (userId: string, role: string) =>
+    fetchApi(`/admin/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
   getKycSubmissions: () => fetchApi('/admin/kyc/submissions'),
+  getKycSignedUrls: (userId: string) => fetchApi(`/admin/kyc/submissions/${userId}/urls`),
   reviewKyc: (userId: string, status: 'approved' | 'rejected', notes?: string) =>
     fetchApi(`/admin/kyc/submissions/${userId}/review`, { method: 'PATCH', body: JSON.stringify({ status, notes }) }),
   getAdminReports: () => fetchApi('/admin/reports'),

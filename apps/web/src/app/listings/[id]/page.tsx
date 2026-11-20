@@ -36,6 +36,78 @@ export default function ListingDetailPage() {
   const [reportReason, setReportReason] = useState('Prohibited Item or Scam');
   const [reportDescription, setReportDescription] = useState('');
 
+  // Rental Request form states (Phase 5.1)
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+  const fourDaysLater = new Date(Date.now() + 4 * 86400000).toISOString().split('T')[0];
+  const [startDate, setStartDate] = useState(tomorrow);
+  const [endDate, setEndDate] = useState(fourDaysLater);
+  const [rentalNotes, setRentalNotes] = useState('');
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookingError, setBookingError] = useState<string | null>(null);
+  const [bookingSuccess, setBookingSuccess] = useState(false);
+
+  const calculatePrice = () => {
+    if (!listing || !startDate || !endDate) return { totalDays: 0, totalPrice: 0, deposit: 0, handover: 0, months: 0, weeks: 0, remainingDays: 0 };
+    const s = new Date(startDate);
+    const e = new Date(endDate);
+    const diffTime = Math.max(0, e.getTime() - s.getTime());
+    const totalDays = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+    let remainingDays = totalDays;
+    let months = 0;
+    let weeks = 0;
+    let totalPrice = 0;
+
+    const monthlyRate = parseFloat(listing.price_per_month) || 0;
+    const weeklyRate = parseFloat(listing.price_per_week) || 0;
+    const dailyRate = parseFloat(listing.price_per_day) || 0;
+
+    if (monthlyRate > 0 && remainingDays >= 30) {
+      months = Math.floor(remainingDays / 30);
+      totalPrice += months * monthlyRate;
+      remainingDays %= 30;
+    }
+    if (weeklyRate > 0 && remainingDays >= 7) {
+      weeks = Math.floor(remainingDays / 7);
+      totalPrice += weeks * weeklyRate;
+      remainingDays %= 7;
+    }
+    totalPrice += remainingDays * dailyRate;
+    const deposit = parseFloat(listing.deposit_amount) || 0;
+
+    return {
+      totalDays,
+      months,
+      weeks,
+      remainingDays,
+      totalPrice,
+      deposit,
+      handover: totalPrice + deposit,
+    };
+  };
+
+  const handleRequestRent = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBookingLoading(true);
+    setBookingError(null);
+    try {
+      await api.createRentalRequest({
+        listing_id: id,
+        start_date: startDate,
+        end_date: endDate,
+        notes: rentalNotes.trim() || undefined,
+      });
+      setBookingSuccess(true);
+      setTimeout(() => {
+        router.push('/rentals');
+      }, 1200);
+    } catch (err: any) {
+      setBookingError(err.message || 'Failed to submit rental request');
+    } finally {
+      setBookingLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!id) return;
     async function loadListing() {
@@ -307,6 +379,127 @@ export default function ListingDetailPage() {
                   {listing.deposit_amount > 0 ? `₹${listing.deposit_amount}` : 'No Deposit'}
                 </span>
               </div>
+            </div>
+
+            {/* Request to Rent Form (Phase 5.1) */}
+            <form onSubmit={handleRequestRent} className="space-y-3 p-4 glass-2 rounded-2xl border border-primary/20">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-text-primary flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5 text-primary" />
+                  <span>Request to Rent</span>
+                </span>
+                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                  0% Commission
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <label className="block text-[10px] font-bold text-text-muted mb-1">Start Date</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full p-2 glass-1 rounded-xl text-xs outline-none focus:ring-1 focus:ring-primary"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-text-muted mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    min={startDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full p-2 glass-1 rounded-xl text-xs outline-none focus:ring-1 focus:ring-primary"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Price Breakdown */}
+              {(() => {
+                const pricing = calculatePrice();
+                return (
+                  <div className="p-2.5 bg-slate-50/70 rounded-xl space-y-1 text-xs border border-slate-200/50">
+                    <div className="flex justify-between text-text-secondary">
+                      <span>Duration:</span>
+                      <span className="font-bold text-text-primary">{pricing.totalDays} day(s)</span>
+                    </div>
+                    {pricing.months > 0 && (
+                      <div className="flex justify-between text-text-secondary text-[11px]">
+                        <span>{pricing.months} month(s) rate:</span>
+                        <span>₹{pricing.months * (parseFloat(listing.price_per_month) || 0)}</span>
+                      </div>
+                    )}
+                    {pricing.weeks > 0 && (
+                      <div className="flex justify-between text-text-secondary text-[11px]">
+                        <span>{pricing.weeks} week(s) rate:</span>
+                        <span>₹{pricing.weeks * (parseFloat(listing.price_per_week) || 0)}</span>
+                      </div>
+                    )}
+                    {pricing.remainingDays > 0 && (
+                      <div className="flex justify-between text-text-secondary text-[11px]">
+                        <span>{pricing.remainingDays} day(s) @ ₹{listing.price_per_day}/day:</span>
+                        <span>₹{pricing.remainingDays * parseFloat(listing.price_per_day)}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-text-secondary pt-1 border-t border-slate-200/50">
+                      <span>Rental Fee:</span>
+                      <span className="font-bold text-text-primary">₹{pricing.totalPrice}</span>
+                    </div>
+                    <div className="flex justify-between text-text-secondary">
+                      <span>Refundable Deposit:</span>
+                      <span className="font-bold text-text-primary">₹{pricing.deposit}</span>
+                    </div>
+                    <div className="flex justify-between text-primary font-bold pt-1 border-t border-slate-200/60 text-xs">
+                      <span>Total on Handover:</span>
+                      <span>₹{pricing.handover}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <textarea
+                rows={2}
+                value={rentalNotes}
+                onChange={(e) => setRentalNotes(e.target.value)}
+                placeholder="Optional notes to host (e.g. pickup time)..."
+                className="w-full p-2 glass-1 rounded-xl text-xs outline-none resize-none"
+              />
+
+              {bookingError && (
+                <div className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded-xl border border-rose-200">
+                  {bookingError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={bookingLoading || bookingSuccess}
+                className="w-full py-3 bg-primary hover:bg-primary-navy text-white font-extrabold text-xs sm:text-sm rounded-xl transition shadow-md shadow-primary/20 flex items-center justify-center gap-1.5"
+              >
+                {bookingSuccess ? (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Request Submitted! Redirecting...</span>
+                  </>
+                ) : bookingLoading ? (
+                  'Submitting Request...'
+                ) : (
+                  <>
+                    <Calendar className="w-4 h-4" />
+                    <span>Submit Rental Request</span>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-slate-200/60"></div>
+              <span className="flex-shrink mx-2 text-[10px] text-text-muted uppercase font-bold tracking-wider">or</span>
+              <div className="flex-grow border-t border-slate-200/60"></div>
             </div>
 
             {/* Direct Inquiry Form */}

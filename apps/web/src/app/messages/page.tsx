@@ -194,7 +194,7 @@ export default function MessagesPage() {
                 <MessageSquare className="w-8 h-8 text-text-muted mx-auto" />
                 <p className="text-xs font-bold text-text-primary">No conversations yet</p>
                 <p className="text-[11px] text-text-muted">
-                  Tap "Chat with Owner" on any rental item to start!
+                  Tap &quot;Chat with Owner&quot; on any rental item to start!
                 </p>
               </div>
             ) : (

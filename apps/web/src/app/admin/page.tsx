@@ -37,7 +37,7 @@ export default function AdminDashboardPage() {
 
   // Dashboard Data
   const [metrics, setMetrics] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'metrics' | 'kyc' | 'users' | 'reports'>('metrics');
+  const [activeTab, setActiveTab] = useState<'metrics' | 'kyc' | 'users' | 'reports' | 'tickets'>('metrics');
   const [loading, setLoading] = useState(false);
 
   // Users state
@@ -49,6 +49,7 @@ export default function AdminDashboardPage() {
   const [kycQueue, setKycQueue] = useState<any[]>([]);
   const [kycTabStatus, setKycTabStatus] = useState<'pending' | 'approved' | 'rejected'>('pending');
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [kycSignedUrls, setKycSignedUrls] = useState<Record<string, { document_url: string; selfie_url: string }>>({});
 
   // Ban modal state
   const [banModalUser, setBanModalUser] = useState<any | null>(null);
@@ -56,6 +57,11 @@ export default function AdminDashboardPage() {
 
   // Reports state
   const [reports, setReports] = useState<any[]>([]);
+
+  // Support Tickets state
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [ticketStatusFilter, setTicketStatusFilter] = useState<string>('all');
+  const [ticketPriorityFilter, setTicketPriorityFilter] = useState<string>('all');
 
   useEffect(() => {
     checkAdminAuth();
@@ -117,17 +123,31 @@ export default function AdminDashboardPage() {
   const loadAdminData = async () => {
     try {
       setLoading(true);
-      const [mRes, kycRes, repRes, uRes] = await Promise.all([
+      const [mRes, kycRes, repRes, uRes, tRes] = await Promise.all([
         api.getAdminMetrics().catch(() => null),
         api.getKycSubmissions().catch(() => null),
         api.getAdminReports().catch(() => null),
         api.getAdminUsers().catch(() => null),
+        api.getAdminTickets().catch(() => null),
       ]);
 
       if (mRes?.metrics) setMetrics(mRes.metrics);
-      if (kycRes?.submissions) setKycQueue(kycRes.submissions);
+      if (kycRes?.submissions) {
+        setKycQueue(kycRes.submissions);
+        // Pre-fetch signed URLs for pending submissions safely
+        for (const item of kycRes.submissions) {
+          api.getKycSignedUrls(item.id)
+            .then((urls) => {
+              if (urls) {
+                setKycSignedUrls((prev) => ({ ...prev, [item.id]: urls }));
+              }
+            })
+            .catch(() => {});
+        }
+      }
       if (repRes?.reports) setReports(repRes.reports);
       if (uRes?.users) setUsers(uRes.users);
+      if (tRes?.tickets) setTickets(tRes.tickets);
     } catch (err) {
       console.error(err);
     } finally {
@@ -135,8 +155,18 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // BAN / UNBAN USER
+  // BAN / UNBAN USER WITH PRIVILEGE PROTECTION
   const executeToggleBan = async (userId: string, isBanned: boolean, reason?: string) => {
+    if (userId === adminUser?.id) {
+      alert('Security Protection: You cannot ban your own administrator account.');
+      return;
+    }
+    const target = users.find((u) => u.id === userId) || banModalUser;
+    if (target?.role === 'admin') {
+      alert('Security Protection: Administrator accounts cannot be banned.');
+      return;
+    }
+
     try {
       await api.toggleBanUser(userId, isBanned, reason || 'Admin moderation action');
       setBanModalUser(null);
@@ -161,6 +191,16 @@ export default function AdminDashboardPage() {
       loadAdminData();
     } catch (err: any) {
       alert(err.message || 'Review submission failed');
+    }
+  };
+
+  const handleUpdateTicket = async (ticketId: string, updates: { status?: string; priority?: string; admin_notes?: string }) => {
+    try {
+      await api.updateAdminTicket(ticketId, updates);
+      alert('Support ticket updated successfully');
+      loadAdminData();
+    } catch (err: any) {
+      alert(err.message || 'Failed to update ticket');
     }
   };
 
@@ -400,6 +440,17 @@ export default function AdminDashboardPage() {
             <span className="px-1.5 py-0.5 rounded-full bg-functional-error text-white text-[9px]">{reports.length}</span>
           )}
         </button>
+        <button
+          onClick={() => setActiveTab('tickets')}
+          className={`pb-3 transition flex items-center gap-1.5 ${activeTab === 'tickets' ? 'text-primary border-b-2 border-primary' : 'hover:text-primary-navy'}`}
+        >
+          <span>Support Tickets Queue</span>
+          {tickets.filter((t) => t.status === 'open' || t.status === 'in_progress').length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[9px] font-bold">
+              {tickets.filter((t) => t.status === 'open' || t.status === 'in_progress').length}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* =========================================================================
@@ -441,19 +492,19 @@ export default function AdminDashboardPage() {
                     </span>
                   </div>
 
-                  {/* Document & Selfie previews */}
+                  {/* Document & Selfie previews with expiring signed URLs */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-1">
-                        Government ID
+                        Government ID (5m Signed URL)
                       </span>
-                      {item.kyc_document_url ? (
+                      {(kycSignedUrls[item.id]?.document_url || item.kyc_document_url) ? (
                         <div
-                          onClick={() => setSelectedImage(item.kyc_document_url)}
+                          onClick={() => setSelectedImage(kycSignedUrls[item.id]?.document_url || item.kyc_document_url)}
                           className="aspect-[4/3] rounded-xl overflow-hidden glass-1 border border-slate-200 cursor-pointer relative group"
                         >
                           <img
-                            src={item.kyc_document_url}
+                            src={kycSignedUrls[item.id]?.document_url || item.kyc_document_url}
                             alt="KYC ID"
                             className="w-full h-full object-cover group-hover:scale-105 transition"
                           />
@@ -471,15 +522,15 @@ export default function AdminDashboardPage() {
 
                     <div>
                       <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider block mb-1">
-                        Live Selfie
+                        Live Selfie (5m Signed URL)
                       </span>
-                      {item.kyc_selfie_url ? (
+                      {(kycSignedUrls[item.id]?.selfie_url || item.kyc_selfie_url) ? (
                         <div
-                          onClick={() => setSelectedImage(item.kyc_selfie_url)}
+                          onClick={() => setSelectedImage(kycSignedUrls[item.id]?.selfie_url || item.kyc_selfie_url)}
                           className="aspect-[4/3] rounded-xl overflow-hidden glass-1 border border-slate-200 cursor-pointer relative group"
                         >
                           <img
-                            src={item.kyc_selfie_url}
+                            src={kycSignedUrls[item.id]?.selfie_url || item.kyc_selfie_url}
                             alt="Selfie"
                             className="w-full h-full object-cover group-hover:scale-105 transition"
                           />
@@ -642,7 +693,11 @@ export default function AdminDashboardPage() {
                         )}
                       </td>
                       <td className="p-4 text-right">
-                        {u.is_banned ? (
+                        {u.id === adminUser?.id || u.role === 'admin' ? (
+                          <span className="text-[10px] font-bold text-text-muted px-2.5 py-1 glass-1 rounded-xl border border-slate-200">
+                            Admin Protected
+                          </span>
+                        ) : u.is_banned ? (
                           <button
                             onClick={() => executeToggleBan(u.id, false, 'Reinstated by admin')}
                             className="inline-flex items-center gap-1 text-xs font-bold px-3 py-1.5 rounded-xl bg-emerald-50 text-functional-success hover:bg-emerald-100 transition border border-emerald-200 shadow-xs"
@@ -723,6 +778,155 @@ export default function AdminDashboardPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB: SUPPORT TICKETS QUEUE
+         ========================================================================= */}
+      {activeTab === 'tickets' && (
+        <div className="space-y-6 animate-fade-in">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-primary-navy">Support Tickets Moderation Queue</h3>
+              <p className="text-xs text-text-secondary">
+                Manage user support inquiries, disputes, and assign status or moderator notes.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <select
+                value={ticketStatusFilter}
+                onChange={(e) => setTicketStatusFilter(e.target.value)}
+                className="px-3 py-1.5 glass-1 rounded-xl text-xs font-semibold outline-none focus:border-primary"
+              >
+                <option value="all">All Statuses</option>
+                <option value="open">Open</option>
+                <option value="in_progress">In Progress</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
+
+              <select
+                value={ticketPriorityFilter}
+                onChange={(e) => setTicketPriorityFilter(e.target.value)}
+                className="px-3 py-1.5 glass-1 rounded-xl text-xs font-semibold outline-none focus:border-primary"
+              >
+                <option value="all">All Priorities</option>
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+
+          {tickets.length === 0 ? (
+            <div className="p-12 text-center glass-1 rounded-3xl border border-white/60">
+              <CheckCircle2 className="w-10 h-10 text-primary mx-auto mb-2" />
+              <p className="text-sm font-bold text-text-primary">No support tickets</p>
+              <p className="text-xs text-text-secondary mt-1">There are no open customer tickets at this time.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {tickets
+                .filter((t) => (ticketStatusFilter === 'all' ? true : t.status === ticketStatusFilter))
+                .filter((t) => (ticketPriorityFilter === 'all' ? true : t.priority === ticketPriorityFilter))
+                .map((ticket) => (
+                  <div
+                    key={ticket.id}
+                    className="glass-2 p-5 rounded-3xl border border-white/80 shadow-glass-sm space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                            ticket.status === 'resolved' || ticket.status === 'closed'
+                              ? 'bg-emerald-50 text-functional-success border border-emerald-200'
+                              : ticket.status === 'in_progress'
+                              ? 'bg-blue-50 text-primary border border-blue-200'
+                              : 'bg-amber-50 text-functional-warning border border-amber-200'
+                          }`}
+                        >
+                          {ticket.status}
+                        </span>
+
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                            ticket.priority === 'urgent'
+                              ? 'bg-rose-50 text-rose-600 border border-rose-200'
+                              : ticket.priority === 'high'
+                              ? 'bg-amber-50 text-amber-600 border border-amber-200'
+                              : 'glass-1 text-text-secondary'
+                          }`}
+                        >
+                          {ticket.priority} priority
+                        </span>
+
+                        <span className="text-[11px] text-text-muted">
+                          Ticket ID: <code className="font-mono text-text-primary">{ticket.id.slice(0, 8)}</code>
+                        </span>
+                      </div>
+
+                      <span className="text-[11px] text-text-muted">
+                        Submitted: {new Date(ticket.created_at).toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h4 className="font-bold text-text-primary text-sm">{ticket.subject}</h4>
+                      <p className="text-xs text-text-secondary mt-1 leading-relaxed whitespace-pre-wrap">
+                        {ticket.description}
+                      </p>
+                    </div>
+
+                    {ticket.admin_notes && (
+                      <div className="p-3 bg-blue-50/70 border border-blue-200/60 rounded-xl text-xs space-y-1">
+                        <span className="text-[10px] font-bold text-primary uppercase tracking-wider block">
+                          Current Admin Notes
+                        </span>
+                        <p className="text-xs text-text-primary">{ticket.admin_notes}</p>
+                      </div>
+                    )}
+
+                    {/* Ticket Controls */}
+                    <div className="pt-3 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-text-muted">Change Status:</span>
+                        {(['open', 'in_progress', 'resolved', 'closed'] as const).map((st) => (
+                          <button
+                            key={st}
+                            disabled={ticket.status === st}
+                            onClick={() => handleUpdateTicket(ticket.id, { status: st })}
+                            className={`px-2.5 py-1 rounded-xl text-[10px] font-bold uppercase transition ${
+                              ticket.status === st
+                                ? 'bg-primary text-white shadow-xs'
+                                : 'glass-1 hover:glass-2 text-text-secondary'
+                            }`}
+                          >
+                            {st}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            const newNotes = prompt('Enter admin response / moderation notes:', ticket.admin_notes || '');
+                            if (newNotes !== null) {
+                              handleUpdateTicket(ticket.id, { admin_notes: newNotes });
+                            }
+                          }}
+                          className="px-3 py-1.5 liquid-blue-gradient text-white font-bold text-xs rounded-xl shadow-xs"
+                        >
+                          Add / Edit Notes
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
             </div>
           )}
         </div>

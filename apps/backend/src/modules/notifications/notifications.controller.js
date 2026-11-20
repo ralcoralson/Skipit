@@ -60,40 +60,44 @@ const markAllAsRead = async (req, res, next) => {
   }
 };
 
+// 4. Register Device Token for Push Notifications (Phase 2.2 & 3.3)
 const registerDeviceToken = async (req, res, next) => {
   try {
-    const { token } = req.body;
+    const { token, platform = 'android' } = req.body;
     if (!token) {
       return res.status(400).json({ success: false, error: 'Device token is required' });
     }
 
     const userId = req.user.id;
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('saved_addresses')
-      .eq('id', userId)
+    const cleanToken = token.trim();
+
+    // Upsert into dedicated device_tokens table
+    const { data: record, error } = await supabaseAdmin
+      .from('device_tokens')
+      .upsert({
+        user_id: userId,
+        token: cleanToken,
+        platform: String(platform).toLowerCase(),
+        last_seen_at: new Date().toISOString(),
+      }, { onConflict: 'token' })
+      .select()
       .single();
 
-    const currentSaved = profile?.saved_addresses || {};
-    const existingTokens = new Set(Array.isArray(currentSaved.fcm_tokens) ? currentSaved.fcm_tokens : []);
-    existingTokens.add(token);
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
 
-    await supabaseAdmin
-      .from('profiles')
-      .update({
-        saved_addresses: {
-          ...currentSaved,
-          fcm_tokens: Array.from(existingTokens),
-        },
-      })
-      .eq('id', userId);
-
-    res.json({ success: true, message: 'Device registered for push notifications' });
+    res.json({
+      success: true,
+      message: 'Device token registered successfully',
+      device: record,
+    });
   } catch (error) {
     next(error);
   }
 };
 
+// 5. Remove Device Token on Logout or Uninstall (Phase 2.2 & 3.3)
 const removeDeviceToken = async (req, res, next) => {
   try {
     const { token } = req.body;
@@ -102,27 +106,19 @@ const removeDeviceToken = async (req, res, next) => {
     }
 
     const userId = req.user.id;
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('saved_addresses')
-      .eq('id', userId)
-      .single();
+    const cleanToken = token.trim();
 
-    const currentSaved = profile?.saved_addresses || {};
-    const existingTokens = new Set(Array.isArray(currentSaved.fcm_tokens) ? currentSaved.fcm_tokens : []);
-    existingTokens.delete(token);
+    const { error } = await supabaseAdmin
+      .from('device_tokens')
+      .delete()
+      .eq('token', cleanToken)
+      .eq('user_id', userId);
 
-    await supabaseAdmin
-      .from('profiles')
-      .update({
-        saved_addresses: {
-          ...currentSaved,
-          fcm_tokens: Array.from(existingTokens),
-        },
-      })
-      .eq('id', userId);
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message });
+    }
 
-    res.json({ success: true, message: 'Device token removed' });
+    res.json({ success: true, message: 'Device token removed successfully' });
   } catch (error) {
     next(error);
   }

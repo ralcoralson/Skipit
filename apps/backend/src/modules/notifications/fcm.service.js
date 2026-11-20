@@ -7,13 +7,13 @@ let fcmInitialized = false;
 const initFirebase = () => {
   if (fcmInitialized) return true;
 
-  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
   if (!serviceAccountKey) {
     if (process.env.NODE_ENV === 'production') {
-      console.warn('[FCM] FIREBASE_SERVICE_ACCOUNT_KEY is not configured in production environment. Push notifications are running in fallback mode.');
+      console.warn('[FCM] FIREBASE_SERVICE_ACCOUNT_KEY is not configured in production environment. Push notifications running in fallback mode.');
     } else {
-      console.log('[FCM] Firebase Admin running in development mode (No push key provided)');
+      console.log('[FCM] Firebase Admin running in development fallback mode');
     }
     return false;
   }
@@ -62,6 +62,28 @@ const initFirebase = () => {
 
 // Attempt initialization on startup
 initFirebase();
+
+/**
+ * Remove dead or expired tokens from dedicated device_tokens table (Phase 2.2)
+ */
+const cleanupExpiredTokens = async (expiredTokens = []) => {
+  if (!Array.isArray(expiredTokens) || expiredTokens.length === 0) return;
+
+  try {
+    const { error } = await supabaseAdmin
+      .from('device_tokens')
+      .delete()
+      .in('token', expiredTokens);
+
+    if (error) {
+      console.warn('[FCM Cleanup Error]:', error.message);
+    } else {
+      console.log(`[FCM Token Purged]: Pruned ${expiredTokens.length} expired device token(s) from device_tokens table.`);
+    }
+  } catch (err) {
+    console.warn('[FCM Token Cleanup Exception]:', err.message);
+  }
+};
 
 /**
  * Send push notification to target device tokens
@@ -113,8 +135,6 @@ const sendPushNotification = async (deviceTokens = [], { title, body, data = {} 
       });
 
       if (expiredTokens.length > 0) {
-        console.log(`[FCM Cleanup] Pruning ${expiredTokens.length} expired device tokens...`);
-        // Remove from database if stored in user profiles
         await cleanupExpiredTokens(expiredTokens);
       }
     }
@@ -131,21 +151,7 @@ const sendPushNotification = async (deviceTokens = [], { title, body, data = {} 
 };
 
 /**
- * Remove dead tokens from profile metadata
- */
-const cleanupExpiredTokens = async (expiredTokens = []) => {
-  try {
-    for (const token of expiredTokens) {
-      // Clean up token from any user who holds it in their metadata
-      console.log(`[FCM Token Purged]: ${token.slice(0, 15)}...`);
-    }
-  } catch (err) {
-    console.warn('[FCM Token Cleanup Warning]:', err.message);
-  }
-};
-
-/**
- * Dispatch rental alert to a user (reads user's FCM tokens, falls back to in-app notification)
+ * Dispatch rental alert to a user (reads user's registered device_tokens, records in-app notification)
  */
 const notifyUser = async (userId, { title, body, data = {} }) => {
   try {
@@ -160,14 +166,18 @@ const notifyUser = async (userId, { title, body, data = {} }) => {
       created_at: new Date().toISOString(),
     }]);
 
-    // 2. Fetch user's profile to check for saved FCM device tokens
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('saved_addresses')
-      .eq('id', userId)
-      .maybeSingle();
+    // 2. Fetch user's registered devices from dedicated device_tokens table (Phase 2.2)
+    const { data: rows, error: tokenErr } = await supabaseAdmin
+      .from('device_tokens')
+      .select('token')
+      .eq('user_id', userId);
 
-    const deviceTokens = profile?.saved_addresses?.fcm_tokens || [];
+    if (tokenErr) {
+      console.warn('[FCM Fetch Tokens Warning]:', tokenErr.message);
+      return;
+    }
+
+    const deviceTokens = (rows || []).map((r) => r.token).filter(Boolean);
 
     if (deviceTokens.length > 0) {
       await sendPushNotification(deviceTokens, { title, body, data });
@@ -181,4 +191,5 @@ module.exports = {
   sendPushNotification,
   notifyUser,
   initFirebase,
+  cleanupExpiredTokens,
 };

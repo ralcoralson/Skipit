@@ -3,8 +3,6 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
-const fs = require('fs');
-const path = require('path');
 const config = require('./config/env');
 const errorHandler = require('./middleware/errorHandler');
 const { generalLimiter } = require('./middleware/rateLimiter');
@@ -111,18 +109,6 @@ app.use('/users', usersRoutes);
 
 app.use('/api/v1/geo', geoRoutes);
 app.use('/geo', geoRoutes);
-
-// Direct APK Download for mobile phones
-const serveApk = (req, res) => {
-  const apkPath = path.resolve(__dirname, '../../mobile/build/app/outputs/flutter-apk/app-release.apk');
-  if (fs.existsSync(apkPath)) {
-    res.download(apkPath, 'SkipIt-v3.0.apk');
-  } else {
-    res.status(404).json({ success: false, error: 'APK build file not found. Please compile the APK.' });
-  }
-};
-app.get('/download/apk', serveApk);
-app.get('/api/v1/download/apk', serveApk);
 
 // 404 handler
 app.use('*', (req, res) => {

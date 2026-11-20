@@ -7,11 +7,11 @@ let fcmInitialized = false;
 const initFirebase = () => {
   if (fcmInitialized) return true;
 
-  const serviceAccountKey = process.env.FIREBASE_SERVICE_ACCOUNT_KEY || process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
-  if (!serviceAccountKey) {
+  if (!serviceAccount) {
     if (process.env.NODE_ENV === 'production') {
-      console.warn('[FCM] FIREBASE_SERVICE_ACCOUNT_KEY is not configured in production environment. Push notifications running in fallback mode.');
+      console.warn('[FCM] FIREBASE_SERVICE_ACCOUNT_JSON is not configured in production environment. Push notifications running in fallback mode.');
     } else {
       console.log('[FCM] Firebase Admin running in development fallback mode');
     }
@@ -20,30 +20,17 @@ const initFirebase = () => {
 
   try {
     let credentialData;
-    if (serviceAccountKey.startsWith('{')) {
-      credentialData = JSON.parse(serviceAccountKey);
+    if (serviceAccount.trim().startsWith('{')) {
+      credentialData = JSON.parse(serviceAccount);
     } else {
       const fs = require('fs');
       const path = require('path');
-      let targetPath = serviceAccountKey;
-      if (!path.isAbsolute(targetPath)) {
-        const base = path.basename(targetPath);
-        const candidates = [
-          path.resolve(process.cwd(), targetPath),
-          path.resolve(process.cwd(), base),
-          path.resolve(process.cwd(), 'apps/backend', base),
-          path.resolve(__dirname, '../../', base),
-          path.resolve(__dirname, '../../../', base),
-          path.resolve(__dirname, '../../../../', base),
-        ];
-        for (const c of candidates) {
-          if (fs.existsSync(c)) {
-            targetPath = c;
-            break;
-          }
-        }
+      const resolvedPath = path.resolve(serviceAccount);
+      if (!fs.existsSync(resolvedPath)) {
+        console.warn(`[FCM] Firebase service account file not found at: ${resolvedPath}`);
+        return false;
       }
-      credentialData = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+      credentialData = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
     }
 
     const certAuth = admin.cert ? admin.cert(credentialData) : admin.credential.cert(credentialData);

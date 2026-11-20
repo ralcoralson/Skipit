@@ -6,9 +6,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Only copy package.json so npm installs purely required production dependencies without lockfile conflict
-COPY package.json ./
-RUN npm install --omit=dev --no-package-lock
+COPY package*.json ./
+RUN npm ci --omit=dev
 
 # Runner stage
 FROM node:20-alpine AS runner
@@ -21,7 +20,7 @@ ENV PORT=5000
 # Run as non-root user for security
 USER node
 
-COPY --chown=node:node package.json ./
+COPY --chown=node:node package*.json ./
 COPY --chown=node:node --from=builder /app/node_modules ./node_modules
 COPY --chown=node:node src/ ./src/
 

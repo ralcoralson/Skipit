@@ -141,7 +141,36 @@ flutter test
 
 ---
 
-## 5. Security & Trust Architecture
+## 5. Security, Trust & Rental Pricing Architecture
+
+### Tiered Rental Pricing Formula
+SkipIt calculates rental totals dynamically based on the listing's configured duration rates:
+1. **Monthly Tier:** If `price_per_month` is configured and duration >= 30 days: `full_months = Math.floor(days / 30)`. Charges `full_months * price_per_month`.
+2. **Weekly Tier:** If `price_per_week` is configured and remaining days >= 7: `full_weeks = Math.floor(remaining_days / 7)`. Charges `full_weeks * price_per_week`.
+3. **Daily Tier:** Remaining days are charged at `remaining_days * price_per_day`.
+4. **Fallback:** If neither weekly nor monthly rate is set, the total is `total_days * price_per_day`.
+5. **Security Deposit:** Any refundable deposit is displayed separately and settled directly between owner and renter upon equipment handover.
+
+### Mobile Release & Distribution
+Mobile application binaries are distributed through standard, sanctioned distribution channels rather than being served via local server disk paths:
+- **Android:**
+  - Build signed release APK / AAB:
+    ```bash
+    cd apps/mobile
+    flutter build appbundle --release --dart-define=API_BASE_URL=https://api.yourdomain.com/api/v1 --dart-define=WS_URL=wss://api.yourdomain.com
+    ```
+  - Distribution via Google Play Console (Internal Testing / Production tracks) or signed standalone APKs via GitHub Releases.
+- **iOS:**
+  - Build signed IPA:
+    ```bash
+    cd apps/mobile
+    flutter build ipa --release --dart-define=API_BASE_URL=https://api.yourdomain.com/api/v1 --dart-define=WS_URL=wss://api.yourdomain.com
+    ```
+  - Distribution via Apple TestFlight and App Store Connect.
+
+---
+
+## 6. Security & Trust Architecture
 - **No Client Exposure:** Elevated service-role Supabase keys remain strictly server-side.
 - **Audit Trails:** Administrative suspensions, KYC approvals, and moderation actions are logged to `audit_log`.
 - **Image Validation:** Multi-part file uploads validate file size (<= 10MB) and MIME formats (JPEG, PNG, WebP).

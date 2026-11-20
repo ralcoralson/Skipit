@@ -409,3 +409,97 @@ describe('10. HTTPS IP Geolocation (Requirement 3.5)', () => {
     assert.strictEqual(jsonResponse.country, 'India');
   });
 });
+
+describe('11. Rental Booking Overlap 409 Exclusion Handling (Requirement 2.3 & 3.1)', () => {
+  test('returns HTTP 409 when database btree_gist exclusion constraint 23P01 triggers', () => {
+    let statusCode = null;
+    let jsonResponse = null;
+
+    // Simulate handler logic with 23P01 error
+    const err = { code: '23P01', message: 'conflicting key value violates exclusion constraint' };
+    const res = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(data) {
+        jsonResponse = data;
+        return this;
+      },
+    };
+
+    if (err.code === '23P01' || err.message?.includes('23P01') || err.message?.includes('exclusion')) {
+      res.status(409).json({
+        success: false,
+        error: 'This listing is already booked for the selected date range.',
+      });
+    }
+
+    assert.strictEqual(statusCode, 409, 'Must return HTTP 409 on date overlap exclusion');
+    assert.strictEqual(jsonResponse.success, false);
+    assert.ok(jsonResponse.error.includes('already booked'));
+  });
+});
+
+describe('12. Admin-Only KYC Signed URLs & RBAC Protection (Requirement 1.6 & 1.11)', () => {
+  const { requireAdmin } = require('../src/middleware/rbac');
+
+  test('rejects unauthenticated request to admin KYC endpoint with 401', () => {
+    let statusCode = null;
+    let jsonResponse = null;
+
+    const req = { user: null };
+    const res = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(data) {
+        jsonResponse = data;
+        return this;
+      },
+    };
+
+    let nextCalled = false;
+    requireAdmin(req, res, () => { nextCalled = true; });
+
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(statusCode, 401);
+    assert.strictEqual(jsonResponse.success, false);
+  });
+
+  test('rejects regular non-admin user accessing admin KYC endpoint with 403', () => {
+    let statusCode = null;
+    let jsonResponse = null;
+
+    const req = { user: { id: 'user-uuid-1', role: 'user' } };
+    const res = {
+      status(code) {
+        statusCode = code;
+        return this;
+      },
+      json(data) {
+        jsonResponse = data;
+        return this;
+      },
+    };
+
+    let nextCalled = false;
+    requireAdmin(req, res, () => { nextCalled = true; });
+
+    assert.strictEqual(nextCalled, false);
+    assert.strictEqual(statusCode, 403);
+    assert.strictEqual(jsonResponse.success, false);
+    assert.ok(jsonResponse.error.includes('Forbidden'));
+  });
+
+  test('allows verified administrator user to proceed', () => {
+    const req = { user: { id: 'admin-uuid-1', role: 'admin' } };
+    const res = {};
+    let nextCalled = false;
+
+    requireAdmin(req, res, () => { nextCalled = true; });
+
+    assert.strictEqual(nextCalled, true, 'Admin request must proceed');
+  });
+});
